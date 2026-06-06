@@ -45,27 +45,26 @@
 
 #### 4.1 Token 序列
 
-模型输入的 Token 序列由以下部分组成，总长度为 2822：
+模型输入的 Token 序列由以下部分组成，总长度为 2662：
 
 | Token 类型 | 数量 |
 | --- | ---: |
 | 视觉 Token | 2304 |
 | 寄存器 Token | 4 |
-| 检测查询 | 256 |
+| 检测查询 | 96 |
 | 轨迹查询 | 256 |
 | 目标导航点 Token | 2 |
 
-每种 Token 都有独立的身份嵌入，包括：轨迹、视觉、寄存器、Agent、Map、Light、Stop、Goal。
+每种 Token 都有独立的身份嵌入，包括：轨迹、视觉、寄存器、Agent、Map、Goal。
 
 #### 4.2 感知任务
 
-感知采用全矢量化形式。256 个检测查询进一步划分为：
+感知采用全矢量化形式。96 个检测查询进一步划分为：
 
 | 查询类型 | 数量 |
 | --- | ---: |
-| Agent | 194 |
-| Map | 60 |
-| Traffic Element | 2 |
+| Agent | 48 |
+| Map | 48 |
 
 Agent 查询负责预测动态目标，输出内容包括：
 
@@ -77,7 +76,7 @@ Agent 查询负责预测动态目标，输出内容包括：
 Agent 检测类别包括：
 
 ```python
-["car", "bicycle", "motorcycle", "pedestrian"]
+["car", "bicycle", "pedestrian"]
 ```
 
 Map 查询负责预测局部道路几何结构：
@@ -89,21 +88,16 @@ Map 查询负责预测局部道路几何结构：
 Map 检测类别包括：
 
 ```python
-["lane_divider", "road_edge", "crosswalk", "centerline"]
+["lane_divider", "road_edge", "centerline"]
 ```
 
-对于没有方向语义的地图元素，例如 `lane_divider`、`road_edge` 和 `crosswalk`，点序正反等价。训练时自动选择正向或反向中误差更小的一种进行监督。
+对于没有方向语义的地图元素，例如 `lane_divider` 和 `road_edge`，点序正反等价。训练时自动选择正向或反向中误差更小的一种进行监督。
 
 对于具有行驶方向语义的 `centerline`，可根据任务需要保留方向监督。
 
-Traffic Element 查询包含 2 个 Token：
+模型不检测红绿灯、Stop 标志或 CrossWalk，也不检测 `motorcycle` 类别。
 
-1. 红绿灯 Token：预测对 ego 存在影响的红绿灯状态和大致位置 $(x, y)$，状态包括红、绿、黄、无；
-2. Stop 标志 Token：预测 Stop 标志的位置 $(x, y)$ 和状态，状态包括有、无。
-
-Traffic Element 只检测最近、可见且会影响 ego 的元素。
-
-所有检测任务都包含“无”类别。Agent 和 Map 检测使用匈牙利匹配；Traffic Element 的标签唯一，不需要匈牙利匹配。
+Agent 和 Map 检测任务都包含“无”类别，并使用匈牙利匹配。
 
 #### 4.3 规划任务
 
@@ -231,7 +225,7 @@ $$
 
 Map 标签也必须在预处理阶段完成局部裁剪和重采样。每条局部 Map 元素统一重采样为 100 个 ego 坐标系 XY 点，只保留前向 32m、左右各 32m 范围内且能使用同一套 `CAM_FRONT.world2cam/intrinsic` 投影到前视图像中的局部元素；缺少相机内外参或投影失败时不应默认视为可见。
 
-Traffic Element 直接使用交叉熵和MSE（Symlog空间）监督。
+模型不包含 Traffic Element 检测头，因此不对红绿灯或 Stop 标志计算检测监督。
 
 #### 5.5 优化器和精度
 
@@ -360,6 +354,7 @@ $$
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
+| 2026-06-06 | 1os3_Codex | AI 完成：将模型检测查询改为 96 个，其中 Agent 和 Map 各 48 个，并移除 CrossWalk、红绿灯、Stop 标志和 motorcycle 检测。 |
 | 2026-06-05 | 1os3_Codex | AI 完成：将 Agent future 监督口径改为以当前 Agent 为原点、坐标轴沿当前 ego 的未来位移。 |
 | 2026-06-04 | 1os3_Codex | AI 完成：将 Agent 可见性准入改为 8 帧历史窗口内至少 2 帧满足单帧可见性条件。 |
 | 2026-06-04 | 1os3_Codex | AI 完成：修正 B2D `theta` 到 ego yaw 的换算口径，强调轨迹、Agent 与 Map 必须使用同一 ego 坐标变换。 |
