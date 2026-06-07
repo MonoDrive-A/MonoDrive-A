@@ -41,7 +41,7 @@
 - 功能：将归一化轨迹词表编码为轨迹查询 embedding。
 - 输入：`TrajectoryVocabData.trajectory_vocab_normalized`。
 - 输出：轨迹查询特征 `[256, 384]`。
-- Shape：`[256, 6, 2] -> [256, 12] -> [256, 12, 64] -> [256, 1536] -> [256, 384]`。
+- Shape：`[256, 6, 2] -> y/x 分别编码为 [256, 6, 128] -> [256, 6, 256] -> [256, 1536] -> [256, 384]`。
 - 关键参数：`frequency_count`、`frequency_base`、`frequency_scale`、`swiglu_hidden_dim`、`hidden_dim`。
 
 ### `TrajectoryVocabularyDecoder`
@@ -75,8 +75,8 @@
 | `trajectory_vocab_m` | `[256, 6, 2]` | ego 坐标系米制词表，单位 meter。 |
 | `trajectory_vocab_symlog` | `[256, 6, 2]` | Symlog 空间词表。 |
 | `trajectory_vocab_normalized` | `[256, 6, 2]` | 已归一化词表，嵌入层使用该字段。 |
-| `frequency_bands` | `[64]` | 高频编码频带。 |
-| 高频编码特征 | `[256, 1536]` | 每坐标 64 个频率，每个频率 sin/cos 两项。 |
+| `frequency_bands` | `[64]` | 高频编码频带，当前为 $2\pi / 10^{i/64}$。 |
+| 高频编码特征 | `[256, 1536]` | 每个时间步按 `[phi_y(y), phi_x(x)]` 拼接，每坐标 64 个频率，每个频率 sin/cos 两项。 |
 | `trajectory_queries` | `[256, 384]` | 轨迹查询特征。 |
 | `trajectory_features` | `[B, 256, 384]` | Transformer 输出的轨迹 token 特征。 |
 | `logits` | `[B, 256]` | 未激活轨迹词表 logit。 |
@@ -88,7 +88,13 @@
 
 `load_trajectory_vocabulary` 要求 `.npz` 同时包含物理词表、Symlog 词表、已归一化词表和 `symlog_scale`。三个词表字段必须与配置中的 `[V, K, D]` 一致，且不能包含 NaN 或 Inf。模型嵌入层只注册 `trajectory_vocab_normalized` 作为 buffer；物理和 Symlog 字段保留给后续 loss、推理或可视化使用。
 
-`TrajectoryVocabularyEmbedding` 对已归一化轨迹执行高频编码。每个归一化坐标乘以 `frequency_scale * frequency_base ** i`，其中 `i` 为频带索引；随后拼接 sin 和 cos，展平后进入 `Linear -> SwiGLU -> Linear`，输出 384 维轨迹查询特征。SwiGLU 激活来自公共模块 `model/swiglu.py`，轨迹词表文件不再维护私有激活实现。
+`TrajectoryVocabularyEmbedding` 对已归一化轨迹执行高频编码。归一化轨迹最后一维按 ego XY 坐标解释，`x` 为前向、`y` 为左向。第 `i` 个频带为：
+
+$$
+\omega_i = \frac{2\pi}{10^{i/64}}
+$$
+
+代码中由 `frequency_scale / frequency_base ** (i / frequency_count)` 表示，当前配置为 `frequency_scale=2π`、`frequency_base=10`、`frequency_count=64`。单个坐标的编码顺序为 `[sin_0, cos_0, ..., sin_63, cos_63]`；每个时间步按 `[phi_y(y), phi_x(x)]` 拼接，再展平进入 `Linear -> SwiGLU -> Linear`，输出 384 维轨迹查询特征。SwiGLU 激活来自公共模块 `model/swiglu.py`，轨迹词表文件不再维护私有激活实现。
 
 `TrajectoryVocabularyDecoder` 使用一个线性层输出 `1 + K * D` 个通道。第 0 个通道作为 logit，不做激活；剩余通道 reshape 为 `[B, V, K, D]` 并经过 Tanh 得到残差。初始化时线性层所有权重为 0，logit bias 为 1，使初始 logit 全部输出 1；残差 bias 设置为 `atanh(residual_output_init_value)`，当前配置下 Tanh 后初始残差为 0。
 
@@ -106,8 +112,8 @@
 | `vocabulary.trajectory_dim` | `2` | 每个轨迹点坐标维度。 |
 | `embedding.hidden_dim` | `384` | 轨迹查询和解码输入特征维度。 |
 | `embedding.frequency_count` | `64` | 每坐标高频编码频率数量。 |
-| `embedding.frequency_base` | `2.0` | 高频编码频带底数。 |
-| `embedding.frequency_scale` | `3.141592653589793` | 高频编码角度缩放系数。 |
+| `embedding.frequency_base` | `10.0` | 高频编码分母底数。 |
+| `embedding.frequency_scale` | `6.283185307179586` | 高频编码角度前置系数，即 $2\pi$。 |
 | `embedding.swiglu_hidden_dim` | `768` | SwiGLU 后中间特征维度。 |
 | `decoder.logit_init_value` | `1.0` | logit 初始输出。 |
 | `decoder.residual_output_init_value` | `0.0` | Tanh 后残差初始输出。 |
@@ -127,12 +133,14 @@
 - 初始化：logit 初始输出为 1，不代表已经 Softmax 后的概率为 1；所有词表项 logit 相同，Softmax 后为均匀分布。
 - 配置：实现文件只读取配置，不重复定义配置文件已有默认值。
 - 字段：嵌入层必须使用 `trajectory_vocab_normalized`，不能直接使用物理空间或 Symlog 字段替代。
+- 维度：高频编码固定按 ego XY 二维轨迹执行，`trajectory_dim` 必须为 2。
 - 路径：配置中的词表路径必须解析到项目目录内。
 
 ## 9. 维护记录
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
+| 2026-06-07 | 1os3_Codex | AI 完成：将轨迹词表高频编码改为 $2\pi / 10^{i/64}$ 频带，并按 `[phi_y(y), phi_x(x)]` 拼接。 |
 | 2026-06-06 | 1os3_Codex | AI 完成：改为复用公共 `model/swiglu.py` 中的 `SwiGLU` 激活。 |
 | 2026-06-06 | 1os3_Codex | AI 完成：将模型侧轨迹词表模块移动到 `model/trajectory_vocab/`，与词表 `.npz` 同目录。 |
 | 2026-06-06 | 1os3_Codex | AI 完成：新增模型侧轨迹词表加载、归一化词表嵌入和单层线性解码模块。 |

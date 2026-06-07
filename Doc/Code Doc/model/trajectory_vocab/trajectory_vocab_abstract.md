@@ -21,7 +21,7 @@
 | 字段 | Shape | 说明 |
 | --- | --- | --- |
 | `trajectory_vocab_normalized` | `[256, 6, 2]` | 嵌入层使用的已归一化词表字段。 |
-| 高频编码 | `[256, 1536]` | 每坐标 64 频 sin/cos 编码。 |
+| 高频编码 | `[256, 1536]` | 每步按 `[phi_y(y), phi_x(x)]` 拼接；每坐标使用 $2\pi / 10^{i/64}$ 的 64 频 sin/cos 编码。 |
 | `trajectory_queries` | `[256, 384]` | 轨迹查询特征。 |
 | `trajectory_features` | `[B, 256, 384]` | 解码层输入。 |
 | `logits` | `[B, 256]` | 未激活轨迹词表 logit，初始输出为 1。 |
@@ -33,7 +33,7 @@
 | --- | --- |
 | `load_trajectory_vocab_config(config_path)` | `config_path` 指向 TOML 文件；词表路径必须是项目内相对路径。 |
 | `load_trajectory_vocabulary(config)` | `.npz` 必须包含配置指定字段，三个词表字段 shape 必须为 `[256, 6, 2]`。 |
-| `TrajectoryVocabularyEmbedding(config, vocabulary)` | 嵌入层只使用 `vocabulary.trajectory_vocab_normalized`，输出 `[256, 384]`。 |
+| `TrajectoryVocabularyEmbedding(config, vocabulary)` | 嵌入层只使用 `vocabulary.trajectory_vocab_normalized`；最后一维按 ego `[x, y]` 解释，输出 `[256, 384]`。 |
 | `TrajectoryVocabularyDecoder(config)` | 输入必须为 `[B, 256, 384]`；logits 不做激活，residuals 经过 Tanh。 |
 
 ## 5. 最小使用示例
@@ -62,13 +62,14 @@ output = decoder(trajectory_queries.unsqueeze(0))
 - 配置默认值只放在 `config/trajectory_vocab.toml`，不要在实现文件重复写默认值。
 - 修改词表数量、未来点数、轨迹维度或 `hidden_dim` 时，必须同步检查 shape 校验、解码输出和代码文档。
 - 解码层初始化要求 logits 初始输出 1，Tanh 残差初始输出 0。
-- 高频编码和嵌入层输入必须来自 `.npz` 的已归一化词表字段。
+- 高频编码和嵌入层输入必须来自 `.npz` 的已归一化词表字段；编码频带为 $2\pi / 10^{i/64}$，每步按 `[phi_y(y), phi_x(x)]` 拼接。
 - SwiGLU 激活来自公共 `model/swiglu.py`，不要在本文件重新实现私有激活层。
 
 ## 7. 维护记录
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
+| 2026-06-07 | 1os3_Codex | AI 完成：同步轨迹词表高频编码公式和 y/x 拼接顺序。 |
 | 2026-06-06 | 1os3_Codex | AI 完成：记录轨迹词表嵌入层改为复用公共 SwiGLU。 |
 | 2026-06-06 | 1os3_Codex | AI 完成：将摘要文档移动到镜像目录 `doc/Code Doc/model/trajectory_vocab/`。 |
 | 2026-06-06 | 1os3_Codex | AI 完成：新增模型侧轨迹词表模块摘要。 |

@@ -41,8 +41,8 @@ class TrajectoryVocabModelConfig:
         trajectory_dim: 每个未来点坐标维度。
         hidden_dim: 轨迹查询和解码输入特征维度。
         frequency_count: 每个归一化坐标使用的高频编码频率数。
-        frequency_base: 高频编码频带底数。
-        frequency_scale: 高频编码角度缩放系数。
+        frequency_base: 高频编码分母底数。
+        frequency_scale: 高频编码角度前置系数。
         swiglu_hidden_dim: SwiGLU 激活后的中间特征维度。
         logit_init_value: 解码层 logit 初始输出值。
         residual_output_init_value: Tanh 后残差初始输出值。
@@ -73,6 +73,11 @@ class TrajectoryVocabModelConfig:
             raise ValueError(f"future_points 必须为正整数，实际为 {self.future_points}。")
         if self.trajectory_dim <= 0:
             raise ValueError(f"trajectory_dim 必须为正整数，实际为 {self.trajectory_dim}。")
+        if self.trajectory_dim != 2:
+            raise ValueError(
+                "trajectory_dim 必须为 2，"
+                f"以按 [phi_y(y), phi_x(x)] 形式编码 ego XY 轨迹，实际为 {self.trajectory_dim}。"
+            )
         if self.hidden_dim <= 0:
             raise ValueError(f"hidden_dim 必须为正整数，实际为 {self.hidden_dim}。")
         if self.frequency_count <= 0:
@@ -179,9 +184,10 @@ class TrajectoryVocabularyEmbedding(nn.Module):
             vocabulary.trajectory_vocab_normalized.detach().clone().to(dtype=torch.float32),
         )
         frequency_exponents = torch.arange(config.frequency_count, dtype=torch.float32)
-        frequency_bands = config.frequency_scale * torch.pow(
+        frequency_exponent_ratios = frequency_exponents / float(config.frequency_count)
+        frequency_bands = config.frequency_scale / torch.pow(
             torch.tensor(config.frequency_base, dtype=torch.float32),
-            frequency_exponents,
+            frequency_exponent_ratios,
         )
         self.register_buffer("frequency_bands", frequency_bands)
         self.linear_in = nn.Linear(
@@ -194,23 +200,44 @@ class TrajectoryVocabularyEmbedding(nn.Module):
     def forward(self) -> torch.Tensor:
         """输出 256 条轨迹查询嵌入。
 
-        归一化词表来自 `.npz` 的已归一化字段，shape 为 `[V, K, D]`。
-        高频编码后展平为 `[V, K * D * frequency_count * 2]`。
+        归一化词表来自 `.npz` 的已归一化字段，shape 为 `[V, K, 2]`，
+        最后一维按 `[x, y]` 解释。高频编码后每个时间步按
+        `[phi_y(y), phi_x(x)]` 拼接，并展平为
+        `[V, K * 2 * frequency_count * 2]`。
         """
 
-        # [V, K, D] -> [V, K * D]
-        flattened_vocab = self.trajectory_vocab_normalized.reshape(self.config.num_trajectories, -1)
-        # [V, K * D] -> [V, K * D, F]
-        encoded_angles = flattened_vocab[..., None] * self.frequency_bands
-        high_frequency_features = torch.cat(
-            (torch.sin(encoded_angles), torch.cos(encoded_angles)),
-            dim=-1,
-        )
-        # [V, K * D, 2F] -> [V, K * D * 2F]
-        high_frequency_features = high_frequency_features.reshape(self.config.num_trajectories, -1)
+        trajectory_x = self.trajectory_vocab_normalized[..., 0]
+        trajectory_y = self.trajectory_vocab_normalized[..., 1]
+        y_features = self._encode_coordinate(trajectory_y)
+        x_features = self._encode_coordinate(trajectory_x)
+        # [V, K, 2F] + [V, K, 2F] -> [V, K, 4F]，每步顺序为 [phi_y, phi_x]。
+        per_step_features = torch.cat((y_features, x_features), dim=-1)
+        # [V, K, 4F] -> [V, K * 2 * 2F]
+        high_frequency_features = per_step_features.reshape(self.config.num_trajectories, -1)
         hidden_features = self.activation(self.linear_in(high_frequency_features))
         trajectory_queries = self.linear_out(hidden_features)
         return trajectory_queries
+
+    def _encode_coordinate(self, coordinates: torch.Tensor) -> torch.Tensor:
+        """将单个 ego 坐标序列编码为交错 sin/cos 高频特征。
+
+        Shape:
+            输入: `[V, K]`。
+            输出: `[V, K, frequency_count * 2]`，顺序为
+            `[sin_0, cos_0, ..., sin_{F-1}, cos_{F-1}]`。
+        """
+
+        # [V, K] -> [V, K, F]
+        encoded_angles = coordinates[..., None] * self.frequency_bands
+        # [V, K, F] -> [V, K, F, 2] -> [V, K, 2F]
+        encoded_features = torch.stack(
+            (torch.sin(encoded_angles), torch.cos(encoded_angles)),
+            dim=-1,
+        )
+        return encoded_features.reshape(
+            *coordinates.shape,
+            self.config.frequency_count * 2,
+        )
 
 
 class TrajectoryVocabularyDecoder(nn.Module):

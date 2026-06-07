@@ -30,7 +30,7 @@
 - 输入：`.npz` 中 `trajectory_vocab_normalized`。
 - 输出：`[256, 384]` 轨迹查询特征。
 - Shape：高频编码展平维度为 `6 * 2 * 64 * 2 = 1536`。
-- 关键参数：`hidden_dim`、`frequency_count`、`frequency_base`、`frequency_scale`、`swiglu_hidden_dim`。
+- 关键参数：`hidden_dim`、`frequency_count`、`frequency_base=10.0`、`frequency_scale=2π`、`swiglu_hidden_dim`。
 
 ### `[decoder]`
 
@@ -45,7 +45,7 @@
 | 名称 | Shape | 说明 |
 | --- | --- | --- |
 | `trajectory_vocab_normalized` | `[256, 6, 2]` | 模型嵌入层使用的已归一化轨迹词表。 |
-| 高频编码 | `[256, 1536]` | 每个坐标 64 频，每个频率包含 sin/cos。 |
+| 高频编码 | `[256, 1536]` | 每个时间步按 `[phi_y(y), phi_x(x)]` 拼接，每个坐标 64 频，每个频率包含 sin/cos。 |
 | 轨迹查询特征 | `[256, 384]` | 嵌入层输出，供 Transformer 轨迹查询使用。 |
 | 解码输入 | `[B, 256, 384]` | Transformer 后的轨迹 token 特征。 |
 | `logits` | `[B, 256]` | 轨迹词表概率的未激活 logit，初始输出为 1。 |
@@ -53,7 +53,7 @@
 
 ## 5. 关键实现逻辑
 
-配置文件分为三个表。`[vocabulary]` 固定模型侧使用的 `.npz` 字段，嵌入层只读取 `normalized_key` 指向的已归一化字段。`[embedding]` 决定高频编码和两层线性嵌入结构。`[decoder]` 决定单层线性解码头的初始化：logit 通道权重为 0、bias 为 `logit_init_value`；残差通道权重为 0、bias 反解为 Tanh 前值，使 Tanh 后初始输出等于 `residual_output_init_value`。
+配置文件分为三个表。`[vocabulary]` 固定模型侧使用的 `.npz` 字段，嵌入层只读取 `normalized_key` 指向的已归一化字段。`[embedding]` 决定高频编码和两层线性嵌入结构；当前频带由 `frequency_scale / frequency_base ** (i / frequency_count)` 生成，对应 $2\pi / 10^{i/64}$。`[decoder]` 决定单层线性解码头的初始化：logit 通道权重为 0、bias 为 `logit_init_value`；残差通道权重为 0、bias 反解为 Tanh 前值，使 Tanh 后初始输出等于 `residual_output_init_value`。
 
 相对路径按项目根目录解析。配置文件不得写入本机绝对路径，避免不同机器和运行目录之间出现不可复现实验。
 
@@ -71,8 +71,8 @@
 | `vocabulary.trajectory_dim` | `2` | 每个轨迹点的 ego XY 坐标维度。 |
 | `embedding.hidden_dim` | `384` | 轨迹查询和解码输入特征维度。 |
 | `embedding.frequency_count` | `64` | 每个归一化坐标的频率数量。 |
-| `embedding.frequency_base` | `2.0` | 高频编码频带底数。 |
-| `embedding.frequency_scale` | `3.141592653589793` | 高频编码角度缩放系数。 |
+| `embedding.frequency_base` | `10.0` | 高频编码分母底数。 |
+| `embedding.frequency_scale` | `6.283185307179586` | 高频编码角度前置系数，即 $2\pi$。 |
 | `embedding.swiglu_hidden_dim` | `768` | SwiGLU 激活后的中间维度。 |
 | `decoder.logit_init_value` | `1.0` | 解码层 logit 初始输出值。 |
 | `decoder.residual_output_init_value` | `0.0` | Tanh 后残差初始输出值。 |
@@ -95,4 +95,5 @@
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
+| 2026-06-07 | 1os3_Codex | AI 完成：同步轨迹词表高频编码配置为 $2\pi / 10^{i/64}$ 形式。 |
 | 2026-06-06 | 1os3_Codex | AI 完成：新增模型侧轨迹词表加载、嵌入和解码配置。 |

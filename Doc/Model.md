@@ -108,6 +108,37 @@ Agent 和 Map 检测任务都包含“无”类别，并使用匈牙利匹配。
 3. 对归一化后的轨迹使用每维 64 频高频编码；
 4. 使用线性层将编码结果映射为轨迹查询。
 
+高频编码按每个未来时间步分别处理 ego 坐标，坐标约定为 `x` 前向、`y` 左向：
+
+$$
+q_n
+=
+\operatorname{MLP}
+\left(
+\operatorname{Concat}_{t=1}^{T}
+\left[
+\phi_y(y_{n,t}),
+\phi_x(x_{n,t})
+\right]
+\right)
+$$
+
+其中单坐标编码为：
+
+$$
+\phi_x(x)
+=
+\left[
+\sin\left(\frac{2\pi x}{10^{0/64}}\right),
+\cos\left(\frac{2\pi x}{10^{0/64}}\right),
+\dots,
+\sin\left(\frac{2\pi x}{10^{63/64}}\right),
+\cos\left(\frac{2\pi x}{10^{63/64}}\right)
+\right]
+$$
+
+`y` 坐标使用同一组频带构造 $\phi_y(y)$。
+
 统一缩放系数很重要，否则不同维度或不同轨迹之间会出现尺度混乱。
 
 目标点编码流程如下：

@@ -11,8 +11,8 @@ trajectory_dim = 2
 [embedding]
 hidden_dim = 384
 frequency_count = 64
-frequency_base = 2.0
-frequency_scale = 3.141592653589793
+frequency_base = 10.0
+frequency_scale = 6.283185307179586
 swiglu_hidden_dim = 768
 
 [decoder]
