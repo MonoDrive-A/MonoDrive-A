@@ -25,6 +25,7 @@ __all__ = [
 
 
 SUPPORTED_VECTOR_ORDERS = {"grid_minus_target", "target_minus_grid"}
+SUPPORTED_VECTOR_TRANSFORMS = {"symlog"}
 SUPPORTED_FLATTEN_ORDERS = {"channel_height_width"}
 SUPPORTED_DTYPE_NAMES = {"float32"}
 
@@ -42,6 +43,7 @@ class TargetPointEmbeddingConfig:
         y_min_m: 栅格右向边界，单位 meter。
         y_max_m: 栅格左向边界，单位 meter。
         vector_order: 栅格向量场方向。
+        vector_transform: 送入卷积前的向量变换，当前为 `symlog`。
         feature_channels: 卷积中间通道数。
         conv1_kernel_size: 第一层卷积核 `[H, W]`。
         conv1_stride: 第一层卷积步长 `[H, W]`。
@@ -68,6 +70,7 @@ class TargetPointEmbeddingConfig:
     y_min_m: float
     y_max_m: float
     vector_order: str
+    vector_transform: str
     feature_channels: int
     conv1_kernel_size: tuple[int, int]
     conv1_stride: tuple[int, int]
@@ -117,6 +120,11 @@ class TargetPointEmbeddingConfig:
             raise ValueError(
                 f"vector_order 仅支持 {sorted(SUPPORTED_VECTOR_ORDERS)}，"
                 f"实际为 {self.vector_order!r}。"
+            )
+        if self.vector_transform not in SUPPORTED_VECTOR_TRANSFORMS:
+            raise ValueError(
+                f"vector_transform 仅支持 {sorted(SUPPORTED_VECTOR_TRANSFORMS)}，"
+                f"实际为 {self.vector_transform!r}。"
             )
         if self.flatten_order not in SUPPORTED_FLATTEN_ORDERS:
             raise ValueError(
@@ -229,7 +237,8 @@ class TargetPointEmbedding(nn.Module):
         """输出目标导航点 Token。
 
         `target_points` 必须是 ego 坐标系下的米制 `[x, y]`，shape 为
-        `[B, 2]`。内部向量场、卷积和输出投影都强制在 FP32 中执行。
+        `[B, 2]`。目标点到栅格中心的米制向量先做 Symlog 变换，再进入卷积。
+        内部向量场、卷积和输出投影都强制在 FP32 中执行。
         """
 
         self._validate_target_points(target_points)
@@ -261,16 +270,39 @@ class TargetPointEmbedding(nn.Module):
             )
 
     def _build_vector_features(self, target_points_fp32: torch.Tensor) -> torch.Tensor:
+        meter_vector_field = self._build_meter_vector_field(target_points_fp32)
+        normalized_vector_field = self._normalize_vector_field(meter_vector_field)
+        # [B, H, W, 2] -> [B, 2, H, W]
+        return normalized_vector_field.permute(0, 3, 1, 2).contiguous()
+
+    def _build_meter_vector_field(self, target_points_fp32: torch.Tensor) -> torch.Tensor:
+        """构造目标点到栅格中心的米制向量场。
+
+        Shape:
+            输入: `[B, 2]`。
+            输出: `[B, H, W, 2]`，单位 meter。
+        """
+
         grid_xy = self.grid_xy.to(device=target_points_fp32.device, dtype=torch.float32)
         # [H, W, 2] 和 [B, 2] -> [B, H, W, 2]。
         if self.config.vector_order == "grid_minus_target":
-            vector_field = grid_xy.unsqueeze(0) - target_points_fp32[:, None, None, :]
+            return grid_xy.unsqueeze(0) - target_points_fp32[:, None, None, :]
         elif self.config.vector_order == "target_minus_grid":
-            vector_field = target_points_fp32[:, None, None, :] - grid_xy.unsqueeze(0)
+            return target_points_fp32[:, None, None, :] - grid_xy.unsqueeze(0)
         else:
             raise ValueError(f"不支持的 vector_order：{self.config.vector_order!r}。")
-        # [B, H, W, 2] -> [B, 2, H, W]
-        return vector_field.permute(0, 3, 1, 2).contiguous()
+
+    def _normalize_vector_field(self, meter_vector_field: torch.Tensor) -> torch.Tensor:
+        """把米制向量场变换到模型输入数值空间。
+
+        Shape:
+            输入: `[B, H, W, 2]`，单位 meter。
+            输出: `[B, H, W, 2]`，Symlog 空间。
+        """
+
+        if self.config.vector_transform == "symlog":
+            return torch.sign(meter_vector_field) * torch.log1p(torch.abs(meter_vector_field))
+        raise ValueError(f"不支持的 vector_transform：{self.config.vector_transform!r}。")
 
     def _validate_embedded_features(self, embedded_features: torch.Tensor) -> None:
         expected_shape = (
@@ -309,6 +341,7 @@ def load_target_point_embedding_config(
 
     target_point_config = _require_table(raw_config, "target_point")
     grid_config = _require_table(raw_config, "grid")
+    normalization_config = _require_table(raw_config, "normalization")
     convolution_config = _require_table(raw_config, "convolution")
     output_config = _require_table(raw_config, "output")
     precision_config = _require_table(raw_config, "precision")
@@ -322,6 +355,7 @@ def load_target_point_embedding_config(
         y_min_m=_require_float(grid_config, "y_min_m"),
         y_max_m=_require_float(grid_config, "y_max_m"),
         vector_order=_require_string(grid_config, "vector_order"),
+        vector_transform=_require_string(normalization_config, "vector_transform"),
         feature_channels=_require_int(convolution_config, "feature_channels"),
         conv1_kernel_size=_require_2d_int_tuple(convolution_config, "conv1_kernel_size"),
         conv1_stride=_require_2d_int_tuple(convolution_config, "conv1_stride"),

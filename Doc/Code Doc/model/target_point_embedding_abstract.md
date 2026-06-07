@@ -2,7 +2,7 @@
 
 ## 1. 文件基本功能
 
-`model/target_point_embedding.py` 实现目标点嵌入层。它读取 `config/target_point_embedding.toml`，把 ego 坐标系 `[B, 2]` 目标点构造成 `18x16` 栅格向量场，经 `1x1`、`3x3`、`2x2` 三层卷积下采样到 `[9, 8]`，展平后用线性层投影为 2 个 384 维目标导航点 Token。
+`model/target_point_embedding.py` 实现目标点嵌入层。它读取 `config/target_point_embedding.toml`，把 ego 坐标系 `[B, 2]` 目标点构造成 `18x16` 米制栅格向量场，逐坐标做 Symlog 变换后，经 `1x1`、`3x3`、`2x2` 三层卷积下采样到 `[9, 8]`，展平后用线性层投影为 2 个 384 维目标导航点 Token。
 
 ## 2. 主要公开接口
 
@@ -18,7 +18,8 @@
 | --- | --- | --- |
 | `load_target_point_embedding_config` | TOML 路径 | `TargetPointEmbeddingConfig` |
 | `TargetPointEmbedding.forward` | `target_points: [B, 2]` | `[B, 2, 384]` |
-| `_build_vector_features` | `[B, 2]` | `[B, 2, 18, 16]` |
+| `_build_meter_vector_field` | `[B, 2]` | `[B, 18, 16, 2]` |
+| `_build_vector_features` | `[B, 2]` | `[B, 2, 18, 16]` Symlog 特征 |
 | `_flatten_embedded_features` | `[B, 16, 9, 8]` | `[B, 1152]` |
 
 ## 4. 公开接口使用规范
@@ -37,6 +38,7 @@
 ## 6. 维护注意事项
 
 - 目标点和栅格坐标均为 ego 坐标系，`x` 前向、`y` 左向，单位 meter。
+- 目标点米制向量场必须先做 Symlog，再送入卷积。
 - 展平后必须经过线性层投影到 `goal_token_count * hidden_dim`，再 reshape 为目标导航点 Token。
 - 模块整体强制 FP32；修改精度策略必须同步更新 `Doc/Model.md`。
 - 修改配置字段、shape、公开接口或精度行为时，必须同步更新完整文档和 `Doc/Code Doc/Index.md`。
@@ -45,4 +47,5 @@
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
+| 2026-06-07 | 1os3_Codex | AI 完成：补充目标点向量场 Symlog 变换说明。 |
 | 2026-06-07 | 1os3_Codex | AI 完成：新增目标点嵌入层摘要文档。 |

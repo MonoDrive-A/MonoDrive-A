@@ -10,6 +10,9 @@ y_min_m = -32.0
 y_max_m = 32.0
 vector_order = "grid_minus_target"
 
+[normalization]
+vector_transform = "symlog"
+
 [convolution]
 feature_channels = 16
 conv1_kernel_size = [1, 1]
