@@ -1,0 +1,46 @@
+[modules]
+vision_config_path = "config/vision_embedding.toml"
+target_point_config_path = "config/target_point_embedding.toml"
+trajectory_vocab_config_path = "config/trajectory_vocab.toml"
+detection_head_config_path = "config/detection_head.toml"
+
+[architecture]
+hidden_dim = 384
+layer_count = 12
+attention_head_count = 8
+register_token_count = 4
+expected_sequence_length = 2662
+token_order = "vision_register_detection_trajectory_goal"
+modal_ffn_layer_indices = [1, 3, 5, 7, 9]
+rms_norm_eps = 1e-6
+
+[attention]
+rope_head_count = 6
+attention_dropout = 0.0
+
+[feed_forward]
+ffn_layer1_output_dim = 1536
+ffn_activation = "swiglu"
+
+[rope]
+theta = 100.0
+axis_dims = [16, 16, 16]
+visual_position_order = "height_width_time"
+position_min = -1.0
+position_max = 1.0
+
+[identity]
+token_type_order = ["vision", "register", "agent", "map", "trajectory", "goal"]
+
+[ego_motion]
+input_dim = 3
+vector_transform = "symlog"
+
+[precision]
+backbone_dtype = "bfloat16"
+attention_dtype = "float32"
+
+[initialization]
+register_token_std = 0.02
+token_type_embedding_std = 0.02
+ego_motion_linear_std = 0.02
