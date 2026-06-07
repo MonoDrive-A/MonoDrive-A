@@ -16,7 +16,7 @@
 | `load_future_trajectories` | function | 读取多个 H5 的 `labels/future_trajectory` 并记录来源索引。 |
 | `sample_trajectory_vocabulary` | function | 使用 FTS 从全集轨迹中采样 `num_trajectories - 1` 条数据轨迹。 |
 | `save_trajectory_vocabulary` | function | 将词表保存为 `.npz`。 |
-| `symlog` | function | 计算 $Symlog(x)=Sign(x)\times Log(|x|+1)$。 |
+| `symlog` | function | 计算 $Symlog(x)=Sign(x)\times \ln(|x|+1)$。 |
 | `main` | function | 命令行入口。 |
 
 ## 3. 关键类和函数
@@ -112,7 +112,7 @@ $$
 Symlog 公式为：
 
 $$
-Symlog(x)=Sign(x)\times Log(|x|+1)
+Symlog(x)=Sign(x)\times \ln(|x|+1)
 $$
 
 共享缩放系数为：
@@ -180,5 +180,6 @@ CLI 参数与上述配置对应，常用命令如下：
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
+| 2026-06-07 | 1os3_Codex | AI 完成：将 Symlog 公式说明和 metadata 公式字符串从 `log` 修正为自然对数 `ln`，实现仍使用 `np.log1p`。 |
 | 2026-06-05 | 1os3_Codex | AI 完成：将 NaN/Inf 轨迹从整文件报错改为逐样本跳过，并在 metadata 中记录过滤统计。 |
 | 2026-06-04 | 1os3_Codex | AI 完成：新增跨场景 H5 未来轨迹 FTS 词表采样工具，强制第 0 条为全零静止轨迹。 |

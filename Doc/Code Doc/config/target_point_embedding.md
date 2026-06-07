@@ -40,7 +40,7 @@
 - 功能：声明目标点米制向量场送入卷积前的变换。
 - 输入：`[B, 18, 16, 2]` 米制向量场。
 - 输出：`[B, 18, 16, 2]` Symlog 空间向量场。
-- Shape：shape 不变，逐坐标计算 $Sign(x) \times Log(|x|+1)$。
+- Shape：shape 不变，逐坐标计算 $Sign(x) \times \ln(|x|+1)$。
 
 ### `[convolution]`
 
@@ -126,5 +126,6 @@
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
+| 2026-06-07 | 1os3_Codex | AI 完成：将目标点向量 Symlog 公式说明从 `Log` 修正为自然对数 `ln`。 |
 | 2026-06-07 | 1os3_Codex | AI 完成：新增 `normalization.vector_transform = "symlog"`，明确目标点米制向量场送入卷积前必须做 Symlog。 |
 | 2026-06-07 | 1os3_Codex | AI 完成：新增目标点嵌入层配置文档，记录栅格、卷积、线性投影和 FP32 精度配置。 |

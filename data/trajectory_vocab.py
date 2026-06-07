@@ -151,7 +151,7 @@ def build_trajectory_vocabulary(config: TrajectoryVocabularyConfig) -> Trajector
         "distance_metric": "mean_squared_error_in_physical_ego_meter_space",
         "static_trajectory_index": 0,
         "static_trajectory_policy": "forced_zero",
-        "symlog": "sign(x) * log(abs(x) + 1)",
+        "symlog": "sign(x) * ln(abs(x) + 1)",
         "symlog_scale": symlog_scale,
         "normalization": "shared_scale_across_all_trajectories_points_and_dimensions",
         "source_h5_paths": tuple(str(path) for path in h5_paths),
@@ -357,7 +357,7 @@ def save_trajectory_vocabulary(
 
 
 def symlog(values: np.ndarray) -> np.ndarray:
-    """计算 `sign(x) * log(abs(x) + 1)`。"""
+    """计算 `sign(x) * ln(abs(x) + 1)`。"""
 
     return (np.sign(values) * np.log1p(np.abs(values))).astype(np.float32)
 

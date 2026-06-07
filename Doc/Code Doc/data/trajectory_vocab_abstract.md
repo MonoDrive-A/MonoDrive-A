@@ -14,7 +14,7 @@
 | `load_future_trajectories` | function | 只读取多个 H5 的 `labels/future_trajectory` 字段，并跳过含 NaN/Inf 的单条轨迹。 |
 | `sample_trajectory_vocabulary` | function | 使用全零静止中心初始化 FTS，并返回数据轨迹索引。 |
 | `save_trajectory_vocabulary` | function | 将词表保存为 `.npz`。 |
-| `symlog` | function | 计算 $Symlog(x)=Sign(x)\times Log(|x|+1)$。 |
+| `symlog` | function | 计算 $Symlog(x)=Sign(x)\times \ln(|x|+1)$。 |
 
 ## 3. 输入输出 Shape 概览
 
@@ -70,5 +70,6 @@ save_trajectory_vocabulary(vocabulary, "data/preprocessed/trajectory_vocab_256.n
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
+| 2026-06-07 | 1os3_Codex | AI 完成：将 Symlog 公式摘要从 `log` 修正为自然对数 `ln`。 |
 | 2026-06-05 | 1os3_Codex | AI 完成：同步 NaN/Inf 轨迹逐样本跳过和 metadata 过滤统计说明。 |
 | 2026-06-04 | 1os3_Codex | AI 完成：新增跨场景 H5 未来轨迹 FTS 词表采样工具摘要。 |

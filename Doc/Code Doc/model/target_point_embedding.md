@@ -69,7 +69,7 @@
 
 初始化时根据栅格范围构造 `grid_xy` buffer。x 方向对应车辆后向到前向，当前范围为 `[-4m, 32m]`；y 方向对应右向到左向，当前范围为 `[-32m, 32m]`。栅格坐标取每个 cell 中心。
 
-前向时先校验 `target_points` 为浮点 `[B, 2]`。随后禁用 autocast，把目标点转为 FP32，并按配置的 `vector_order` 生成米制向量场。米制向量场逐坐标执行 `Symlog(x)=Sign(x) * Log(|x|+1)`，再从 `[B, H, W, 2]` 转为 `[B, 2, H, W]` 后依次进入 `1x1`、`3x3`、`2x2` 卷积。最后按 `channel_height_width` 展平，用单个线性层投影到 `goal_token_count * hidden_dim`，并 reshape 为目标导航点 Token。
+前向时先校验 `target_points` 为浮点 `[B, 2]`。随后禁用 autocast，把目标点转为 FP32，并按配置的 `vector_order` 生成米制向量场。米制向量场逐坐标执行 `Symlog(x)=Sign(x) * ln(|x|+1)`，再从 `[B, H, W, 2]` 转为 `[B, 2, H, W]` 后依次进入 `1x1`、`3x3`、`2x2` 卷积。最后按 `channel_height_width` 展平，用单个线性层投影到 `goal_token_count * hidden_dim`，并 reshape 为目标导航点 Token。
 
 模块初始化和 `_apply` 后都会调用 FP32 恢复逻辑，将所有浮点参数、buffer 和已有梯度恢复为 `torch.float32`。因此即使外层启用 BF16 autocast 或调用父模型整体 `.to(dtype=torch.bfloat16)`，目标点嵌入层内部仍保持 FP32 参数、buffer 和输出。
 
@@ -104,5 +104,6 @@
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
+| 2026-06-07 | 1os3_Codex | AI 完成：将目标点向量 Symlog 公式说明从 `Log` 修正为自然对数 `ln`。 |
 | 2026-06-07 | 1os3_Codex | AI 完成：修正目标点嵌入层，使米制向量场送入卷积前先做 Symlog，并补充配置校验。 |
 | 2026-06-07 | 1os3_Codex | AI 完成：新增目标点嵌入层，实现配置加载、栅格向量场、三层卷积下采样、线性投影为 2 个目标导航点 Token，并强制 FP32。 |
