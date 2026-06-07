@@ -1,0 +1,29 @@
+[dinov3]
+model_path = "model/dinov3-vitb16-pretrain-lvd1689m"
+local_files_only = true
+trust_remote_code = true
+freeze_dinov3 = true
+
+[input]
+input_frames = 8
+input_channels = 3
+input_height = 288
+input_width = 512
+input_value_range = "zero_one"
+image_mean = [0.485, 0.456, 0.406]
+image_std = [0.229, 0.224, 0.225]
+
+[compression]
+residual_block_count = 4
+temporal_compression_after_block = 3
+temporal_compression_kernel = [2, 1, 1]
+temporal_compression_stride = [2, 1, 1]
+output_hidden_dim = 384
+
+[precision]
+dinov3_dtype = "bfloat16"
+conv_dtype = "bfloat16"
+
+[output]
+token_order = "time_height_width"
+expected_token_count = 2304
