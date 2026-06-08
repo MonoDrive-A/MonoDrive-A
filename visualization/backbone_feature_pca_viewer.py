@@ -64,8 +64,12 @@ class ModelOutputVisualizationData:
 
     target_point: np.ndarray
     future_trajectory: np.ndarray
+    trajectory_vocab_probabilities: np.ndarray
     top_trajectory_indices: np.ndarray
     top_trajectory_scores: np.ndarray
+    top_trajectory_vocab_points: np.ndarray
+    top_trajectory_residuals: np.ndarray
+    top_trajectory_corrections: np.ndarray
     top_trajectory_points: np.ndarray
     agent_scores: np.ndarray
     agent_class_ids: np.ndarray
@@ -313,6 +317,9 @@ def render_visualization(data: BackboneFeaturePCAVisualizationData) -> Image.Ima
 
     norm_origin = (margin + 560, 1290)
     _draw_norm_summary(draw, norm_origin, data, font)
+
+    trajectory_origin = (margin + 1100, 1290)
+    _draw_trajectory_diagnostics(draw, trajectory_origin, data.model_outputs, font)
     return canvas
 
 
@@ -693,6 +700,85 @@ def _draw_norm_summary(
     )
 
 
+def _draw_trajectory_diagnostics(
+    draw: ImageDraw.ImageDraw,
+    origin: tuple[int, int],
+    outputs: ModelOutputVisualizationData,
+    font: ImageFont.ImageFont,
+) -> None:
+    x0, y0 = origin
+    width = 632
+    height = 300
+    draw.rounded_rectangle([x0, y0, x0 + width, y0 + height], radius=8, fill=(255, 255, 255), outline=(203, 213, 225))
+    draw.text((x0 + 14, y0 + 12), "trajectory vocab probability / residual correction", fill=(15, 23, 42), font=font)
+
+    probabilities = outputs.trajectory_vocab_probabilities.astype(np.float64, copy=False)
+    positive_probabilities = probabilities[probabilities > 0.0]
+    entropy = float(-(positive_probabilities * np.log(positive_probabilities)).sum())
+    normalized_entropy = entropy / max(math.log(max(int(probabilities.size), 2)), 1e-12)
+    top_mass = float(outputs.top_trajectory_scores.sum())
+    draw.text(
+        (x0 + 14, y0 + 36),
+        f"vocab={int(probabilities.size)} top_mass={top_mass:.3f} entropy_norm={normalized_entropy:.3f}",
+        fill=(51, 65, 85),
+        font=font,
+    )
+
+    display_count = min(int(outputs.top_trajectory_scores.shape[0]), 5)
+    if display_count == 0:
+        draw.text((x0 + 14, y0 + 72), "no trajectory candidates", fill=(100, 116, 139), font=font)
+        return
+
+    draw.text((x0 + 14, y0 + 66), "rank/id", fill=(100, 116, 139), font=font)
+    draw.text((x0 + 90, y0 + 66), "probability", fill=(100, 116, 139), font=font)
+    draw.text((x0 + 250, y0 + 66), "top residual correction", fill=(100, 116, 139), font=font)
+    max_score = max(float(outputs.top_trajectory_scores.max()), 1e-12)
+    for row_index in range(display_count):
+        row_y = y0 + 90 + row_index * 40
+        color = TRAJECTORY_COLORS[row_index % len(TRAJECTORY_COLORS)]
+        trajectory_id = int(outputs.top_trajectory_indices[row_index])
+        score = float(outputs.top_trajectory_scores[row_index])
+        residual = outputs.top_trajectory_residuals[row_index]
+        correction = outputs.top_trajectory_corrections[row_index]
+        correction_norms = np.linalg.norm(correction, axis=-1)
+        final_correction = correction[-1]
+        residual_abs_max = float(np.abs(residual).max())
+        correction_mean = float(correction_norms.mean())
+        correction_max = float(correction_norms.max())
+
+        draw.rectangle([x0 + 14, row_y + 5, x0 + 24, row_y + 15], fill=color)
+        draw.text((x0 + 32, row_y), f"#{row_index + 1} id={trajectory_id}", fill=(15, 23, 42), font=font)
+
+        bar_left = x0 + 90
+        bar_top = row_y + 3
+        bar_width = 130
+        draw.rectangle([bar_left, bar_top, bar_left + bar_width, bar_top + 12], outline=(203, 213, 225))
+        fill_width = int(round(bar_width * score / max_score))
+        draw.rectangle([bar_left, bar_top, bar_left + fill_width, bar_top + 12], fill=color)
+        draw.text((bar_left, row_y + 18), f"p={score:.4f}", fill=(51, 65, 85), font=font)
+
+        draw.text(
+            (x0 + 250, row_y),
+            f"raw|max={residual_abs_max:.3f} meter mean/max={correction_mean:.2f}/{correction_max:.2f}",
+            fill=(51, 65, 85),
+            font=font,
+        )
+        draw.text(
+            (x0 + 250, row_y + 18),
+            f"final delta=({float(final_correction[0]):+.2f},{float(final_correction[1]):+.2f}) m",
+            fill=(51, 65, 85),
+            font=font,
+        )
+
+    if int(outputs.top_trajectory_scores.shape[0]) > display_count:
+        draw.text(
+            (x0 + 14, y0 + height - 24),
+            f"showing first {display_count}/{int(outputs.top_trajectory_scores.shape[0])} trajectory rows",
+            fill=(100, 116, 139),
+            font=font,
+        )
+
+
 def _summarize_model_outputs(
     backbone_output: MonoDriveBackboneOutput,
     model: MonoDriveBackbone,
@@ -704,7 +790,15 @@ def _summarize_model_outputs(
 ) -> ModelOutputVisualizationData:
     """把模型空间输出转换为 BEV 诊断图使用的米制数据。"""
 
-    trajectory_indices, trajectory_scores, trajectory_points = _summarize_trajectory_outputs(
+    (
+        trajectory_probabilities,
+        trajectory_indices,
+        trajectory_scores,
+        trajectory_vocab_points,
+        trajectory_residuals,
+        trajectory_corrections,
+        trajectory_points,
+    ) = _summarize_trajectory_outputs(
         backbone_output,
         model,
         trajectory_top_k,
@@ -718,8 +812,12 @@ def _summarize_model_outputs(
     return ModelOutputVisualizationData(
         target_point=_tensor_to_numpy(sample["target_point"]).astype(np.float32, copy=False),
         future_trajectory=_tensor_to_numpy(sample["future_trajectory"]).astype(np.float32, copy=False),
+        trajectory_vocab_probabilities=trajectory_probabilities,
         top_trajectory_indices=trajectory_indices,
         top_trajectory_scores=trajectory_scores,
+        top_trajectory_vocab_points=trajectory_vocab_points,
+        top_trajectory_residuals=trajectory_residuals,
+        top_trajectory_corrections=trajectory_corrections,
         top_trajectory_points=trajectory_points,
         agent_scores=agent_scores,
         agent_class_ids=agent_class_ids,
@@ -739,7 +837,7 @@ def _summarize_trajectory_outputs(
     backbone_output: MonoDriveBackboneOutput,
     model: MonoDriveBackbone,
     top_k: int,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     logits = backbone_output.trajectory_output.logits[0].detach().to(dtype=torch.float32).cpu()
     residuals = backbone_output.trajectory_output.residuals[0].detach().to(dtype=torch.float32).cpu()
     probabilities = torch.softmax(logits, dim=-1)
@@ -747,11 +845,19 @@ def _summarize_trajectory_outputs(
     scores, indices = torch.topk(probabilities, k=selected_count)
     vocab_symlog = model.vocabulary.trajectory_vocab_symlog.detach().to(dtype=torch.float32).cpu()
     symlog_scale = model.vocabulary.symlog_scale.detach().to(dtype=torch.float32).cpu()
-    selected_symlog = vocab_symlog[indices] + residuals[indices] * symlog_scale
+    selected_vocab_symlog = vocab_symlog[indices]
+    selected_residuals = residuals[indices]
+    selected_symlog = selected_vocab_symlog + selected_residuals * symlog_scale
+    vocab_points = _inverse_symlog(selected_vocab_symlog)
     trajectory_points = _inverse_symlog(selected_symlog)
+    trajectory_corrections = trajectory_points - vocab_points
     return (
+        probabilities.numpy().astype(np.float32, copy=False),
         indices.numpy().astype(np.int32, copy=False),
         scores.numpy().astype(np.float32, copy=False),
+        vocab_points.numpy().astype(np.float32, copy=False),
+        selected_residuals.numpy().astype(np.float32, copy=False),
+        trajectory_corrections.numpy().astype(np.float32, copy=False),
         trajectory_points.numpy().astype(np.float32, copy=False),
     )
 

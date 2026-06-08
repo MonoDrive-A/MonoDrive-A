@@ -2,7 +2,7 @@
 
 ## 1. 文件职责
 
-`visualization/backbone_feature_pca_viewer.py` 负责对统一序列 Transformer 主干做 FP32 诊断可视化。它读取 B2D H5 样本，加载 `config/backbone.toml`，临时把主干、注意力和视觉嵌入精度覆盖为 FP32，可选从 checkpoint 加载真实训练权重，然后直接调用 `MonoDriveBackbone`，收集每层 Transformer 输出后的视觉 Token，并将每层特征图 PCA 到 RGB 后导出 PNG。同时，它会把模型检测、地图和轨迹输出转换为 ego 米制 BEV 诊断图，默认最多检查 48 个 Agent 查询和 48 个 Map 查询，但只绘制最高概率类别不是 `none` 的查询。
+`visualization/backbone_feature_pca_viewer.py` 负责对统一序列 Transformer 主干做 FP32 诊断可视化。它读取 B2D H5 样本，加载 `config/backbone.toml`，临时把主干、注意力和视觉嵌入精度覆盖为 FP32，可选从 checkpoint 加载真实训练权重，然后直接调用 `MonoDriveBackbone`，收集每层 Transformer 输出后的视觉 Token，并将每层特征图 PCA 到 RGB 后导出 PNG。同时，它会把模型检测、地图和轨迹输出转换为 ego 米制 BEV 诊断图，默认最多检查 48 个 Agent 查询和 48 个 Map 查询，但只绘制最高概率类别不是 `none` 的查询；另有轨迹诊断栏显示 256 维词表概率统计和 top-k 轨迹的 residual 修正。
 
 该文件不复制主干、DINOv3、RoPE、检测头或轨迹词表逻辑。
 
@@ -10,7 +10,7 @@
 
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
-| `ModelOutputVisualizationData` | dataclass | 模型输出 BEV 可视化所需的轨迹、Agent 和 Map 预测。 |
+| `ModelOutputVisualizationData` | dataclass | 模型输出 BEV 可视化所需的轨迹、轨迹词表概率、top-k residual 修正、Agent 和 Map 预测。 |
 | `BackboneFeaturePCAVisualizationData` | dataclass | 渲染 PNG 所需的样本、shape、精度和 PCA 图。 |
 | `run_backbone_feature_pca_sample` | function | 调用真实主干并收集每层视觉 Token PCA 数据。 |
 | `render_backbone_feature_pca_sample` | function | 运行主干并保存 PNG。 |
@@ -26,7 +26,10 @@
   - `images`: `[8, H, W, 3]`。
   - `layer_pca_images`: `[12, 4, 288, 512, 3]`。
   - `layer_token_norms`: `[12, 4, 18, 32]`。
+  - `model_outputs.trajectory_vocab_probabilities`: `[256]`。
   - `model_outputs.top_trajectory_points`: `[5, 6, 2]`。
+  - `model_outputs.top_trajectory_residuals`: `[5, 6, 2]`。
+  - `model_outputs.top_trajectory_corrections`: `[5, 6, 2]`。
   - `model_outputs.agent_boxes`: `[A, 6]`，`A <= 48`。
   - `model_outputs.map_points`: `[M, 100, 2]`，`M <= 48`。
 
@@ -35,7 +38,11 @@
 - 功能：保存模型输出 BEV 面板需要的预测结果。
 - 输入：由 `_summarize_model_outputs` 从 `MonoDriveBackboneOutput` 构造。
 - Shape：
-  - `top_trajectory_points`: `[K, 6, 2]`，ego 坐标系米制轨迹。
+  - `trajectory_vocab_probabilities`: `[V]`，轨迹词表 softmax 概率。
+  - `top_trajectory_points`: `[K, 6, 2]`，ego 坐标系米制 residual 修正后轨迹。
+  - `top_trajectory_vocab_points`: `[K, 6, 2]`，ego 坐标系米制词表基准轨迹。
+  - `top_trajectory_residuals`: `[K, 6, 2]`，模型输出的 top-k raw residual，来自 `tanh` 后的归一化空间。
+  - `top_trajectory_corrections`: `[K, 6, 2]`，修正后轨迹相对词表基准轨迹的米制位移。
   - `agent_boxes`: `[A, 6]`，`[x, y, l, w, h, yaw]`。
   - `agent_future_points`: `[A, 6, 2]`，ego 坐标系米制 future。
   - `map_points`: `[M, 100, 2]`，ego 坐标系米制 Map 点。
@@ -62,7 +69,10 @@
 | `backbone_output.sequence_features` | `[1, 2662, 384]` | 统一主干输出。 |
 | `backbone_output.layer_vision_features` | 12 项 `[1, 2304, 384]` | 每层视觉 Token。 |
 | `layer_pca_images` | `[12, 4, 288, 512, 3]` | 每层每个 latent 时间片的 PCA RGB 图。 |
+| `trajectory_vocab_probabilities` | `[256]` | 轨迹词表 softmax 概率，用于轨迹诊断栏的概率质量和熵统计。 |
 | `top_trajectory_points` | `[5, 6, 2]` | 轨迹 top-k，`vocab_symlog + residual * symlog_scale` 后反 Symlog 到米制。 |
+| `top_trajectory_residuals` | `[5, 6, 2]` | top-k 轨迹 raw residual，仍在模型 residual 输出空间。 |
+| `top_trajectory_corrections` | `[5, 6, 2]` | top-k 轨迹 residual 生效后的米制修正量，即修正后轨迹减词表基准轨迹。 |
 | `agent_boxes` | `[A, 6]` | Agent 查询，`A <= 48`；每个 query 先取包含 `none` 在内的类别 softmax argmax，若 argmax 为 `none` 则不绘制。 |
 | `map_points` | `[M, 100, 2]` | Map 查询，`M <= 48`；每个 query 先取包含 `none` 在内的类别 softmax argmax，若 argmax 为 `none` 则不绘制。 |
 | 输出 PNG | image file | 主干诊断图。 |
@@ -73,7 +83,7 @@
 
 模型调用路径是 `MonoDriveBackbone(..., return_layer_features=True)`。每层视觉 Token 根据 `latent_grid_shape` reshape 为 `[T, H, W, D]`，再转为 `[D, T, H, W]` 做通道 PCA。PCA 只用于诊断，不参与模型训练或推理逻辑。
 
-模型输出 BEV 面板从同一次 `MonoDriveBackboneOutput` 中读取检测和轨迹输出。轨迹使用 Softmax 选择 top-k 词表项，把 `trajectory_vocab_symlog + predicted_residual * symlog_scale` 反 Symlog 到米制轨迹。Agent 输出对每个 query 在包含 `none` 的完整类别 softmax 上取最高概率类别；若最高类别不是 `none`，才进入绘制候选并按该概率取 top-k，对 `x/y/v/future` 使用反 Symlog、对 `l/w/h` 使用 `expm1`，并用 `[sin_yaw, cos_yaw]` 反求 yaw。Map 输出同样过滤 `none` query 后再取 top-k，对点坐标反 Symlog 后绘制 polyline。`--agent-top-k` 和 `--map-top-k` 可用于临时减少绘制数量。
+模型输出 BEV 面板从同一次 `MonoDriveBackboneOutput` 中读取检测和轨迹输出。轨迹使用 Softmax 选择 top-k 词表项，把 `trajectory_vocab_symlog + predicted_residual * symlog_scale` 反 Symlog 到米制轨迹。右下角轨迹诊断栏额外显示完整词表概率数量、top-k 概率质量、归一化熵、每条 top 轨迹的概率条、raw residual 最大值、米制 residual correction 的 mean/max 以及最后一个 future 点的 correction。Agent 输出对每个 query 在包含 `none` 的完整类别 softmax 上取最高概率类别；若最高类别不是 `none`，才进入绘制候选并按该概率取 top-k，对 `x/y/v/future` 使用反 Symlog、对 `l/w/h` 使用 `expm1`，并用 `[sin_yaw, cos_yaw]` 反求 yaw。Map 输出同样过滤 `none` query 后再取 top-k，对点坐标反 Symlog 后绘制 polyline。`--agent-top-k` 和 `--map-top-k` 可用于临时减少绘制数量。
 
 输出路径通过项目根目录校验，默认写入 `visualization/outputs/backbone_feature_pca/`。
 
@@ -106,6 +116,7 @@
 - 诊断图中的 PCA RGB 只用于观察特征空间结构，不代表注意力权重或 loss。
 - 模型输出 BEV 面板只做诊断级反变换和排序展示，不替代正式推理后处理、NMS、Hungarian matching 或安全过滤。
 - Detection query 的显示类别来自该 query 在包含 `none` 的完整类别 softmax 上的 argmax；argmax 为 `none` 的 query 会被过滤，不进入 BEV 绘制。
+- 轨迹诊断栏的 `raw|max` 是 top-k residual 张量的绝对值最大值；`meter mean/max` 和 `final delta` 是 residual 生效后相对词表基准轨迹的米制修正。
 - `--checkpoint` 使用严格 `load_state_dict`，checkpoint 结构不匹配时应直接报错。
 - CPU 上运行会加载 DINOv3 和完整 12 层主干，可能耗时较长。
 - 修改主干输出、层特征收集或命令行参数时，必须同步更新摘要文档和 `doc/Code Doc/Index.md`。
@@ -114,6 +125,7 @@
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
+| 2026-06-08 | 1os3_Codex | AI 完成：新增轨迹词表概率与 top-k residual 修正诊断栏，并记录 raw residual 与米制 correction。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：检测输出 BEV 面板过滤最高概率类别为 `none` 的 Agent/Map query。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：检测输出 BEV 面板改为每个 Agent/Map query 显示包含 `none` 在内的最高概率类别和概率。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：新增 `--checkpoint` 加载真实模型权重，并同步轨迹 residual 的 `symlog_scale` 反解口径。 |
