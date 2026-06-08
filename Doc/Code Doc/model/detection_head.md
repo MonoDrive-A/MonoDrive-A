@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | `DetectionHeadConfig` | dataclass | 检测头配置对象，所有结构默认值来自 `config/detection_head.toml`。 |
 | `DetectionDecoderOutput` | NamedTuple | 检测解码输出，包含 Agent 和 Map 的分类与连续预测。 |
-| `DetectionQueryEmbedding` | class | 生成 `[96, 384]` 检测查询 Token 初值。 |
+| `DetectionQueryEmbedding` | class | 生成 `[48, 384]` 检测查询 Token 初值。 |
 | `DetectionHeadDecoder` | class | 用 FP32 线性层解码 Agent 和 Map 输出。 |
 | `load_detection_head_config` | function | 读取并校验 TOML 配置。 |
 
@@ -23,7 +23,7 @@
 - 功能：承载检测查询、Agent 输出、Map 输出、初始化和精度配置。
 - 输入：`config/detection_head.toml`。
 - 输出：不可变配置对象。
-- Shape：推导总检测查询数 96、Agent 输出维度 67、Map 输出维度 204。
+- Shape：推导总检测查询数 48、Agent 输出维度 67、Map 输出维度 204。
 - 关键约束：
   - Agent / Map 查询不按类别硬分配。
   - 空间采样数 `radial_count * angle_count` 必须等于对应查询数量。
@@ -34,25 +34,25 @@
 
 - 功能：根据空间 anchor 初始化检测查询 Token。
 - 输入：无运行时输入；初始化时读取配置。
-- 输出：`[96, 384]` FP32 检测查询 Token。
+- 输出：`[48, 384]` FP32 检测查询 Token。
 - Shape：
-  - Agent anchor：`[48, 2]`。
-  - Map anchor：`[48, 2]`。
-  - 查询 Token：`[96, 384]`。
+  - Agent anchor：`[16, 2]`。
+  - Map anchor：`[32, 2]`。
+  - 查询 Token：`[48, 384]`。
 - 关键参数：`anchor_feature_order`、Agent / Map 空间角度范围和半径范围。
 
 ### `DetectionHeadDecoder`
 
 - 功能：从检测 Token 特征解码 Agent 和 Map 输出。
-- 输入：`detection_features`，shape 为 `[B, 96, 384]`。
+- 输入：`detection_features`，shape 为 `[B, 48, 384]`。
 - 输出：`DetectionDecoderOutput`。
 - Shape：
-  - Agent class logits：`[B, 48, 4]`。
-  - Agent states：`[B, 48, 11]`。
-  - Agent mode logits：`[B, 48, 4]`。
-  - Agent future：`[B, 48, 4, 6, 2]`。
-  - Map class logits：`[B, 48, 4]`。
-  - Map points：`[B, 48, 100, 2]`。
+  - Agent class logits：`[B, 16, 4]`。
+  - Agent states：`[B, 16, 11]`。
+  - Agent mode logits：`[B, 16, 4]`。
+  - Agent future：`[B, 16, 4, 6, 2]`。
+  - Map class logits：`[B, 32, 4]`。
+  - Map points：`[B, 32, 100, 2]`。
 - 关键参数：`agent_output_linear` 和 `map_output_linear` 均强制 FP32。
 
 ### `load_detection_head_config`
@@ -66,22 +66,22 @@
 
 | 名称 | Shape | 说明 |
 | --- | --- | --- |
-| `DetectionQueryEmbedding.forward()` | `[96, 384]` | FP32 检测查询 Token。 |
-| `detection_features` | `[B, 96, 384]` | Transformer 后的检测 Token 特征。 |
-| `agent_class_logits` | `[B, 48, 4]` | Agent 分类未激活 logit，最后一类为“无”。 |
-| `agent_states` | `[B, 48, 11]` | Agent 状态，字段顺序来自配置。 |
-| `agent_mode_logits` | `[B, 48, 4]` | Agent future mode 未激活 logit。 |
-| `agent_future_trajectories` | `[B, 48, 4, 6, 2]` | Agent future Symlog 空间位移。 |
-| `map_class_logits` | `[B, 48, 4]` | Map 分类未激活 logit，最后一类为“无”。 |
-| `map_points` | `[B, 48, 100, 2]` | Map 点 Symlog 空间 ego XY 预测。 |
+| `DetectionQueryEmbedding.forward()` | `[48, 384]` | FP32 检测查询 Token。 |
+| `detection_features` | `[B, 48, 384]` | Transformer 后的检测 Token 特征。 |
+| `agent_class_logits` | `[B, 16, 4]` | Agent 分类未激活 logit，最后一类为“无”。 |
+| `agent_states` | `[B, 16, 11]` | Agent 状态，字段顺序来自配置。 |
+| `agent_mode_logits` | `[B, 16, 4]` | Agent future mode 未激活 logit。 |
+| `agent_future_trajectories` | `[B, 16, 4, 6, 2]` | Agent future Symlog 空间位移。 |
+| `map_class_logits` | `[B, 32, 4]` | Map 分类未激活 logit，最后一类为“无”。 |
+| `map_points` | `[B, 32, 100, 2]` | Map 点 Symlog 空间 ego XY 预测。 |
 
 ## 5. 关键实现逻辑
 
 `load_detection_head_config` 使用 `tomllib` 读取 TOML，并要求配置文件位于项目目录内。实现端不提供结构默认值；缺少表、字段、字段类型错误或 shape 约束不满足都会直接抛出异常。
 
-`DetectionQueryEmbedding` 在初始化时分别构造 Agent 和 Map 空间 anchor。当前配置使用半径 6 档、角度 8 档，在 `[-60°, 60°]` 范围内形成 48 个空间位置。查询不绑定类别，只在前若干 hidden 通道写入空间和任务标记特征，包括 Symlog 后的 `x/y`、半径归一化、角度归一化、角度 sin/cos、Agent / Map 标记和查询进度。
+`DetectionQueryEmbedding` 在初始化时分别构造 Agent 和 Map 空间 anchor。当前配置中 Agent 使用半径 4 档、角度 4 档形成 16 个空间位置；Map 使用半径 4 档、角度 8 档形成 32 个空间位置；两者角度范围均为 `[-60°, 60°]`。查询不绑定类别，只在前若干 hidden 通道写入空间和任务标记特征，包括 Symlog 后的 `x/y`、半径归一化、角度归一化、角度 sin/cos、Agent / Map 标记和查询进度。
 
-`DetectionHeadDecoder` 使用两个任务分支线性层。Agent 分支输出分类、状态、mode logits 和 future；Map 分支输出分类和 Map 点。前向时会校验输入为浮点 `[B, 96, 384]`，随后禁用 autocast，把输入转为 FP32，再执行线性层。解码输出不做 Softmax、不做 Tanh、不做 Sigmoid、不做反 Symlog。
+`DetectionHeadDecoder` 使用两个任务分支线性层。Agent 分支输出分类、状态、mode logits 和 future；Map 分支输出分类和 Map 点。前向时会校验输入为浮点 `[B, 48, 384]`，随后禁用 autocast，把输入转为 FP32，再执行线性层。解码输出不做 Softmax、不做 Tanh、不做 Sigmoid、不做反 Symlog。
 
 Agent 解码初始化利用查询 anchor 产生初始检测先验：`x/y` 输出读取查询 Token 中的 `x_symlog/y_symlog` 通道；`sin_yaw/cos_yaw` 读取查询角度；尺寸 bias 写入 `log1p(l/w/h)`；速度和加速度 bias 写入 Symlog 空间初值。4 个 mode 的 future bias 按配置角度和未来距离构造，使 mode 初始方向等间隔覆盖前方 120 度。
 
@@ -127,4 +127,5 @@ Map 解码初始化把每个 Map 查询的 100 个点都接到查询 anchor 的 
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
+| 2026-06-08 | 1os3_Codex | AI 完成：同步 Agent 16 个、Map 32 个检测查询和输出 shape。 |
 | 2026-06-07 | 1os3_Codex | AI 完成：新增检测查询初始化和检测解码头，实现无类别硬分配查询、Agent 4-mode 120 度均匀初始化、FP32 解码线性层和模型空间输出。 |

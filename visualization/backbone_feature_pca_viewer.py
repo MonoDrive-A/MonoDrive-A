@@ -48,7 +48,8 @@ TRAJECTORY_COLORS = [
     (220, 38, 38),
 ]
 DEFAULT_TRAJECTORY_TOP_K = 5
-DEFAULT_DETECTION_TOP_K = 48
+DEFAULT_AGENT_TOP_K = 16
+DEFAULT_MAP_TOP_K = 32
 
 
 @dataclass(frozen=True)
@@ -128,8 +129,8 @@ def run_backbone_feature_pca_sample(
     device: str | torch.device = "cpu",
     checkpoint_path: str | Path | None = None,
     trajectory_top_k: int = DEFAULT_TRAJECTORY_TOP_K,
-    agent_top_k: int = DEFAULT_DETECTION_TOP_K,
-    map_top_k: int = DEFAULT_DETECTION_TOP_K,
+    agent_top_k: int = DEFAULT_AGENT_TOP_K,
+    map_top_k: int = DEFAULT_MAP_TOP_K,
 ) -> BackboneFeaturePCAVisualizationData:
     """调用真实统一主干，收集每层视觉 Token PCA 数据。"""
 
@@ -252,8 +253,8 @@ def render_backbone_feature_pca_sample(
     device: str | torch.device = "cpu",
     checkpoint_path: str | Path | None = None,
     trajectory_top_k: int = DEFAULT_TRAJECTORY_TOP_K,
-    agent_top_k: int = DEFAULT_DETECTION_TOP_K,
-    map_top_k: int = DEFAULT_DETECTION_TOP_K,
+    agent_top_k: int = DEFAULT_AGENT_TOP_K,
+    map_top_k: int = DEFAULT_MAP_TOP_K,
 ) -> Path:
     """运行真实统一主干并导出每层 PCA 诊断 PNG。"""
 
@@ -785,8 +786,8 @@ def _summarize_model_outputs(
     sample: dict[str, Any],
     model_weight_source: str,
     trajectory_top_k: int = DEFAULT_TRAJECTORY_TOP_K,
-    agent_top_k: int = DEFAULT_DETECTION_TOP_K,
-    map_top_k: int = DEFAULT_DETECTION_TOP_K,
+    agent_top_k: int = DEFAULT_AGENT_TOP_K,
+    map_top_k: int = DEFAULT_MAP_TOP_K,
 ) -> ModelOutputVisualizationData:
     """把模型空间输出转换为 BEV 诊断图使用的米制数据。"""
 
@@ -1187,14 +1188,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--agent-top-k",
         type=int,
-        default=DEFAULT_DETECTION_TOP_K,
-        help="模型输出 BEV 面板绘制的 Agent 数量，默认显示完整 48 个查询。",
+        default=DEFAULT_AGENT_TOP_K,
+        help="模型输出 BEV 面板绘制的 Agent 数量，默认显示完整 16 个查询。",
     )
     parser.add_argument(
         "--map-top-k",
         type=int,
-        default=DEFAULT_DETECTION_TOP_K,
-        help="模型输出 BEV 面板绘制的 Map 数量，默认显示完整 48 个查询。",
+        default=DEFAULT_MAP_TOP_K,
+        help="模型输出 BEV 面板绘制的 Map 数量，默认显示完整 32 个查询。",
     )
     args = parser.parse_args(argv)
 

@@ -6,10 +6,10 @@ detection_head_config_path = "config/detection_head.toml"
 
 [architecture]
 hidden_dim = 384
-layer_count = 12
+layer_count = 16
 attention_head_count = 8
 register_token_count = 4
-expected_sequence_length = 2662
+expected_sequence_length = 2614
 token_order = "vision_register_detection_trajectory_goal"
 modal_ffn_layer_indices = [1, 3, 5, 7, 9]
 rms_norm_eps = 1e-6

@@ -16,8 +16,8 @@
 | 名称 | Shape | 说明 |
 | --- | --- | --- |
 | 轨迹 logits | `[B, V]` | 使用 soft cross entropy。 |
-| Agent future mask | `[B, 48, 4, 6]` | 逐 mode / 逐点有效 mask。 |
-| Map 点 | `[B, 48, 100, 2]` | 匹配 query 的 Symlog 空间监督。 |
+| Agent future mask | `[B, 16, 4, 6]` | 逐 mode / 逐点有效 mask。 |
+| Map 点 | `[B, 32, 100, 2]` | 匹配 query 的 Symlog 空间监督。 |
 
 ## 4. 使用规范
 
@@ -35,6 +35,7 @@
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
+| 2026-06-08 | 1os3_Codex | AI 完成：同步 Agent 16 / Map 32 loss shape 摘要。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：同步自动检测分类权重的 logits 梯度预算口径。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：同步检测分类 none / non-none 类别权重摘要。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：同步轨迹词表 soft CE loss 摘要。 |

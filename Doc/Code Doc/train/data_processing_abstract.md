@@ -23,11 +23,11 @@
 | --- | --- | --- |
 | 轨迹 soft label | `[B, V]` | 由词表轨迹和 GT 的物理空间 MSE 构造。 |
 | 轨迹残差目标 | `[B, V, 6, 2]` | 只监督 winner 轨迹。 |
-| Agent 分类目标 | `[B, 48]` | 未匹配 query 为 none。 |
-| Agent 状态目标 | `[B, 48, 11]` | 匹配后写回监督空间。 |
-| Agent future mask | `[B, 48, 4, 6]` | 只监督 winner mode 中有效 future 点。 |
-| Map 分类目标 | `[B, 48]` | 未匹配 query 为 none。 |
-| Map 点目标 | `[B, 48, 100, 2]` | 匹配后写回 Symlog 空间。 |
+| Agent 分类目标 | `[B, 16]` | 未匹配 query 为 none。 |
+| Agent 状态目标 | `[B, 16, 11]` | 匹配后写回监督空间。 |
+| Agent future mask | `[B, 16, 4, 6]` | 只监督 winner mode 中有效 future 点。 |
+| Map 分类目标 | `[B, 32]` | 未匹配 query 为 none。 |
+| Map 点目标 | `[B, 32, 100, 2]` | 匹配后写回 Symlog 空间。 |
 
 ## 4. 使用规范
 
@@ -54,6 +54,7 @@
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
+| 2026-06-08 | 1os3_Codex | AI 完成：同步 Agent 16 / Map 32 匹配目标 shape 摘要。 |
 | 2026-06-07 | 1os3_Codex | AI 完成：新增训练数据处理模块摘要。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：更新 Agent future 逐点 mask 和 Map 正反点序监督摘要。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：记录 H5 只读数据源允许项目外绝对路径。 |

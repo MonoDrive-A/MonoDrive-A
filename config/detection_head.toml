@@ -1,7 +1,7 @@
 [query]
 hidden_dim = 384
-agent_query_count = 48
-map_query_count = 48
+agent_query_count = 16
+map_query_count = 32
 token_order = "agent_then_map"
 
 [query_embedding]
@@ -43,8 +43,8 @@ angle_min_deg = -60.0
 angle_max_deg = 60.0
 radial_min_m = 4.0
 radial_max_m = 32.0
-radial_count = 6
-angle_count = 8
+radial_count = 4
+angle_count = 4
 spatial_order = "radius_major_angle_minor"
 
 [agent_state_initialization]
@@ -77,7 +77,7 @@ angle_min_deg = -60.0
 angle_max_deg = 60.0
 radial_min_m = 4.0
 radial_max_m = 32.0
-radial_count = 6
+radial_count = 4
 angle_count = 8
 spatial_order = "radius_major_angle_minor"
 

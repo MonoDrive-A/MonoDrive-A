@@ -47,14 +47,14 @@
 - 功能：把 Agent 预测反变换到物理空间并执行 Hungarian matching。
 - 输入：检测输出、batch、检测配置和训练数据配置。
 - 输出：Agent 分类、状态、mode、future 目标和匹配索引。
-- Shape：分类 `[B, 48]`，状态 `[B, 48, 11]`，future `[B, 48, 4, 6, 2]`，future mask `[B, 48, 4, 6]`。
+- Shape：分类 `[B, 16]`，状态 `[B, 16, 11]`，future `[B, 16, 4, 6, 2]`，future mask `[B, 16, 4, 6]`。
 
 ### `build_map_matching_targets`
 
 - 功能：把 Map 点预测反 Symlog 到物理空间并执行 Hungarian matching。
 - 输入：检测输出、batch、检测配置和训练数据配置。
 - 输出：Map 分类、点监督目标和匹配索引。
-- Shape：分类 `[B, 48]`，点 `[B, 48, 100, 2]`。
+- Shape：分类 `[B, 32]`，点 `[B, 32, 100, 2]`。
 
 ## 4. 输入输出与 Shape
 
@@ -65,11 +65,11 @@
 | `trajectory_output.logits` | `[B, V]` | 轨迹词表未激活 logit。 |
 | `trajectory_output.residuals` | `[B, V, 6, 2]` | Symlog 空间残差。 |
 | `trajectory_soft_labels` | `[B, V]` | 由物理空间 MSE 构造、和为 1 的 soft label。 |
-| `agent_class_logits` | `[B, 48, C_agent + 1]` | Agent 分类预测。 |
-| `agent_states` | `[B, 48, 11]` | Agent 监督空间状态预测。 |
-| `agent_future_trajectories` | `[B, 48, 4, 6, 2]` | Agent future Symlog 空间预测。 |
-| `agent_future_mask` | `[B, 48, 4, 6]` | 只在匹配 query 的 winner mode 和有效 future 点为真。 |
-| `map_points` | `[B, 48, 100, 2]` | Map 点 Symlog 空间预测。 |
+| `agent_class_logits` | `[B, 16, C_agent + 1]` | Agent 分类预测。 |
+| `agent_states` | `[B, 16, 11]` | Agent 监督空间状态预测。 |
+| `agent_future_trajectories` | `[B, 16, 4, 6, 2]` | Agent future Symlog 空间预测。 |
+| `agent_future_mask` | `[B, 16, 4, 6]` | 只在匹配 query 的 winner mode 和有效 future 点为真。 |
+| `map_points` | `[B, 32, 100, 2]` | Map 点 Symlog 空间预测。 |
 
 ## 5. 关键实现逻辑
 
@@ -107,6 +107,7 @@ Map 匹配中，预测点反 Symlog 到 ego meter 空间计算点误差。`lane_
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
+| 2026-06-08 | 1os3_Codex | AI 完成：同步 Agent 16 / Map 32 检测监督 shape。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：轨迹 residual 目标改为除以 `symlog_scale` 的归一化空间，反解时乘回 `symlog_scale`。 |
 | 2026-06-07 | 1os3_Codex | AI 完成：新增训练数据处理模块，支持 H5 样本过滤、轨迹词表标签、Agent/Map Hungarian matching，并移除危险轨迹判断。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：将 Agent future mask 改为 winner mode 逐点 mask，并让 Map 无方向类别监督沿用匹配时误差更小的点序。 |

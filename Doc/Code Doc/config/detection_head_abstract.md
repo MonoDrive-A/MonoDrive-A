@@ -2,7 +2,7 @@
 
 ## 1. 文件基本功能
 
-`config/detection_head.toml` 保存模型侧检测查询初始化和检测解码头配置。它定义 Agent / Map 各 48 个查询、384 维 hidden、空间 anchor 初始化、Agent 4 个 future mode 在 120 度范围内均匀散布、Agent / Map 输出字段，以及检测解码线性层的 FP32 精度。
+`config/detection_head.toml` 保存模型侧检测查询初始化和检测解码头配置。它定义 Agent 16 个查询、Map 32 个查询、384 维 hidden、空间 anchor 初始化、Agent 4 个 future mode 在 120 度范围内均匀散布、Agent / Map 输出字段，以及检测解码线性层的 FP32 精度。
 
 ## 2. 主要公开接口
 
@@ -21,12 +21,12 @@
 
 | 阶段 | Shape | 说明 |
 | --- | --- | --- |
-| 检测查询 Token | `[96, 384]` | Agent 48 个，Map 48 个。 |
-| Agent class logits | `[B, 48, 4]` | 3 个前景类加“无”类别。 |
-| Agent states | `[B, 48, 11]` | Agent 平面状态、尺寸、朝向、速度和加速度。 |
-| Agent future | `[B, 48, 4, 6, 2]` | 4-mode Symlog 空间 future 位移。 |
-| Map class logits | `[B, 48, 4]` | 3 个前景类加“无”类别。 |
-| Map points | `[B, 48, 100, 2]` | Symlog 空间 Map 点。 |
+| 检测查询 Token | `[48, 384]` | Agent 16 个，Map 32 个。 |
+| Agent class logits | `[B, 16, 4]` | 3 个前景类加“无”类别。 |
+| Agent states | `[B, 16, 11]` | Agent 平面状态、尺寸、朝向、速度和加速度。 |
+| Agent future | `[B, 16, 4, 6, 2]` | 4-mode Symlog 空间 future 位移。 |
+| Map class logits | `[B, 32, 4]` | 3 个前景类加“无”类别。 |
+| Map points | `[B, 32, 100, 2]` | Symlog 空间 Map 点。 |
 
 ## 4. 公开接口使用规范
 
@@ -53,4 +53,5 @@
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
+| 2026-06-08 | 1os3_Codex | AI 完成：同步 Agent 16 / Map 32 检测查询摘要。 |
 | 2026-06-07 | 1os3_Codex | AI 完成：新增检测头配置摘要文档。 |

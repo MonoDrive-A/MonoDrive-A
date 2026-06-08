@@ -59,6 +59,8 @@ SUPPORTED_TOKEN_TYPES = {"vision", "register", "agent", "map", "trajectory", "go
 SUPPORTED_ACTIVATIONS = {"swiglu"}
 SUPPORTED_POSITION_ORDERS = {"height_width_time"}
 SUPPORTED_VECTOR_TRANSFORMS = {"symlog"}
+GOAL_TOKEN_INSERT_LAYER_INDEX = 12
+DETECTION_OUTPUT_LAYER_INDEX = GOAL_TOKEN_INSERT_LAYER_INDEX - 1
 
 
 @dataclass(frozen=True)
@@ -132,6 +134,11 @@ class BackboneConfig:
     def __post_init__(self) -> None:
         _validate_positive_int(self.hidden_dim, "hidden_dim")
         _validate_positive_int(self.layer_count, "layer_count")
+        if self.layer_count <= GOAL_TOKEN_INSERT_LAYER_INDEX:
+            raise ValueError(
+                "layer_count 必须至少为 13，"
+                f"以便第 13 层输入前加入目标点 Token，实际为 {self.layer_count}。"
+            )
         _validate_positive_int(self.attention_head_count, "attention_head_count")
         if self.hidden_dim % self.attention_head_count != 0:
             raise ValueError(
@@ -254,15 +261,21 @@ class BackboneTokenSlices(NamedTuple):
 
         return int(self.goal.stop)
 
+    @property
+    def pre_goal_length(self) -> int:
+        """第 13 层输入前、不含目标点 Token 的序列长度。"""
+
+        return int(self.goal.start)
+
 
 class MonoDriveBackboneOutput(NamedTuple):
     """统一主干前向输出。
 
     Shape:
-        `sequence_features`: `[B, 2662, D]`。
+        `sequence_features`: `[B, 2614, D]`。
         `vision_features`: `[B, 2304, D]`。
         `register_features`: `[B, 4, D]`。
-        `detection_features`: `[B, 96, D]`。
+        `detection_features`: 第 12 层输出，`[B, 48, D]`。
         `trajectory_features`: `[B, 256, D]`。
         `trajectory_decoder_features`: `[B, 256, D]`。
         `goal_features`: `[B, 2, D]`。
@@ -284,11 +297,11 @@ class MonoDriveBackboneOutput(NamedTuple):
 
 
 class _BackboneInputSequence(NamedTuple):
-    """统一主干输入序列及其未加身份嵌入的检测查询基线。
+    """第 1-12 层输入序列及其未加身份嵌入的检测查询基线。
 
     Shape:
-        `token_features`: `[B, 2662, D]`。
-        `initial_detection_queries`: `[B, 96, D]`。
+        `token_features`: `[B, 2612, D]`。
+        `initial_detection_queries`: `[B, 48, D]`。
     """
 
     token_features: torch.Tensor
@@ -588,26 +601,43 @@ class MonoDriveBackbone(nn.Module):
         )
         input_sequence = self._build_input_sequence(
             vision_output.tokens,
-            target_points,
             images.device,
             token_slices,
         )
         token_features = input_sequence.token_features
 
+        detection_features: torch.Tensor | None = None
         layer_vision_features = []
         with _precision_context(images.device, self.config.backbone_torch_dtype):
-            for transformer_block in self.transformer_blocks:
+            for layer_index, transformer_block in enumerate(self.transformer_blocks):
+                if layer_index == GOAL_TOKEN_INSERT_LAYER_INDEX:
+                    token_features = self._append_goal_tokens(
+                        token_features,
+                        target_points,
+                        images.device,
+                        token_slices,
+                    )
                 token_features = transformer_block(token_features, visual_positions, token_slices)
+                if layer_index == DETECTION_OUTPUT_LAYER_INDEX:
+                    detection_features = self._split_sequence_features(
+                        token_features,
+                        token_slices,
+                    )["detection"]
                 if return_layer_features:
                     layer_vision_features.append(token_features[:, token_slices.vision, :].detach())
 
+        if detection_features is None:
+            raise RuntimeError(
+                "未能取得第 12 层检测 Token 输出，"
+                f"layer_count={self.config.layer_count}。"
+            )
         split_features = self._split_sequence_features(token_features, token_slices)
         trajectory_decoder_features = self._prepare_trajectory_decoder_features(
             split_features["trajectory"],
             ego_motion,
         )
         detection_decoder_features = self._prepare_detection_decoder_features(
-            split_features["detection"],
+            detection_features,
             input_sequence.initial_detection_queries,
         )
         detection_output = self.detection_decoder(detection_decoder_features)
@@ -616,7 +646,7 @@ class MonoDriveBackbone(nn.Module):
             sequence_features=token_features,
             vision_features=split_features["vision"],
             register_features=split_features["register"],
-            detection_features=split_features["detection"],
+            detection_features=detection_features,
             trajectory_features=split_features["trajectory"],
             trajectory_decoder_features=trajectory_decoder_features,
             goal_features=split_features["goal"],
@@ -760,7 +790,6 @@ class MonoDriveBackbone(nn.Module):
     def _build_input_sequence(
         self,
         vision_tokens: torch.Tensor,
-        target_points: torch.Tensor,
         device: torch.device,
         token_slices: BackboneTokenSlices,
     ) -> _BackboneInputSequence:
@@ -771,7 +800,6 @@ class MonoDriveBackbone(nn.Module):
             dtype=torch.float32,
         )
         trajectory_tokens = self.trajectory_embedding().to(device=device, dtype=torch.float32)
-        goal_tokens = self.target_point_embedding(target_points.to(device=device))
 
         register_tokens = register_tokens.unsqueeze(0).expand(batch_size, -1, -1)
         initial_detection_queries = detection_query_tokens.unsqueeze(0).expand(batch_size, -1, -1)
@@ -785,7 +813,6 @@ class MonoDriveBackbone(nn.Module):
             token_slices,
         )
         trajectory_tokens = self._add_type_embedding(trajectory_tokens, "trajectory")
-        goal_tokens = self._add_type_embedding(goal_tokens, "goal")
         return _BackboneInputSequence(
             token_features=torch.cat(
                 (
@@ -793,12 +820,34 @@ class MonoDriveBackbone(nn.Module):
                     register_tokens,
                     detection_tokens,
                     trajectory_tokens,
-                    goal_tokens,
                 ),
                 dim=1,
             ),
             initial_detection_queries=initial_detection_queries,
         )
+
+    def _append_goal_tokens(
+        self,
+        token_features: torch.Tensor,
+        target_points: torch.Tensor,
+        device: torch.device,
+        token_slices: BackboneTokenSlices,
+    ) -> torch.Tensor:
+        if int(token_features.shape[1]) != token_slices.pre_goal_length:
+            raise ValueError(
+                "加入目标点 Token 前的序列长度必须等于 pre_goal_length，"
+                f"期望 {token_slices.pre_goal_length}，实际为 {token_features.shape[1]}。"
+            )
+        goal_tokens = self.target_point_embedding(target_points.to(device=device))
+        goal_tokens = self._add_type_embedding(goal_tokens, "goal")
+        goal_tokens = goal_tokens.to(device=token_features.device, dtype=token_features.dtype)
+        token_features = torch.cat((token_features, goal_tokens), dim=1)
+        if int(token_features.shape[1]) != token_slices.total_length:
+            raise ValueError(
+                "加入目标点 Token 后的序列长度必须等于 total_length，"
+                f"期望 {token_slices.total_length}，实际为 {token_features.shape[1]}。"
+            )
+        return token_features
 
     def _add_type_embedding(self, token_features: torch.Tensor, token_type: str) -> torch.Tensor:
         type_index = self.token_type_to_index[token_type]

@@ -2,7 +2,7 @@
 
 ## 1. 文件职责
 
-`config/backbone.toml` 保存 MonoDrive 统一序列 Transformer 主干的可提交配置。它声明主干读取的子配置路径、统一序列结构、Transformer 层数、注意力头数、视觉 RoPE、模态独立 FFN、身份嵌入、自车运动嵌入和精度策略。
+`config/backbone.toml` 保存 MonoDrive 统一序列 Transformer 主干的可提交配置。它声明主干读取的子配置路径、统一序列结构、16 层 Transformer、注意力头数、视觉 RoPE、模态独立 FFN、身份嵌入、自车运动嵌入和精度策略。
 
 该文件不保存本机私有绝对路径、临时输出路径、模型权重或训练缓存。
 
@@ -29,16 +29,16 @@
 | 配置组 | Shape / 语义 | 说明 |
 | --- | --- | --- |
 | `[modules]` | 项目内相对路径 | 子配置路径会被解析到项目目录内。 |
-| `[architecture]` | `[B, 2662, 384]` | 统一序列长度和隐藏维度。 |
+| `[architecture]` | `[B, 2614, 384]` | 最终统一序列长度和隐藏维度；第 1-12 层不含 Goal Token 时长度为 2612。 |
 | `[attention]` | 8 heads，其中前 6 heads 对视觉 Token 应用 RoPE | 非视觉 Token 不应用 RoPE。 |
 | `[rope]` | `[H, W, T]` 位置坐标，范围 `[-1, 1]` | 与视觉 token 顺序 `[T, H, W]` 对齐。 |
 | `[ego_motion]` | `[B, 3] -> [B, 384]` | 自车运动状态先 Symlog，再线性投影并加到轨迹 Token。 |
 
 ## 5. 关键实现逻辑
 
-主干配置集中记录会影响统一序列结构的参数。`hidden_dim` 必须与视觉嵌入、目标点嵌入、轨迹词表和检测头配置中的隐藏维度一致。`expected_sequence_length` 必须等于视觉 Token、寄存器 Token、检测 Token、轨迹 Token 和目标导航点 Token 数之和。
+主干配置集中记录会影响统一序列结构的参数。`hidden_dim` 必须与视觉嵌入、目标点嵌入、轨迹词表和检测头配置中的隐藏维度一致。`expected_sequence_length` 必须等于视觉 Token、寄存器 Token、检测 Token、轨迹 Token 和目标导航点 Token 数之和，当前为 `2304 + 4 + 48 + 256 + 2 = 2614`。
 
-`modal_ffn_layer_indices` 使用 0-based 索引。当前 `[1, 3, 5, 7, 9]` 对应设计文档中按 1 开始计数的第 2、4、6、8、10 层。
+`modal_ffn_layer_indices` 使用 0-based 索引。当前 `[1, 3, 5, 7, 9]` 对应设计文档中按 1 开始计数的第 2、4、6、8、10 层。新增的第 13-16 层不在该列表中，均使用单路 FFN。
 
 视觉 RoPE 的 `theta` 为 `100.0`。实现只对视觉 Token 的前 `rope_head_count` 个注意力头应用 RoPE；寄存器、检测、轨迹和目标导航点 Token 不构造零坐标，也不执行 RoPE。
 
@@ -83,6 +83,7 @@
 
 - 子配置路径必须是项目内相对路径。
 - 修改序列长度、Token 数或隐藏维度时，必须同步检查所有子配置。
+- 第 1-12 层不输入目标点 Token，第 13 层输入前追加目标点 Token；该口径变更必须同步 `model/backbone.py` 文档。
 - 修改 RoPE 头数、轴通道或基频时，必须同步更新 `model/backbone.py` 文档和主干可视化文档。
 - 可视化脚本会在运行时覆盖精度为 FP32，但不会修改本配置文件。
 
@@ -90,4 +91,5 @@
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
+| 2026-06-08 | 1os3_Codex | AI 完成：同步 16 层主干、2614 最终序列长度和新增四层单路 FFN 配置。 |
 | 2026-06-07 | 1os3_Codex | AI 完成：新增统一序列 Transformer 主干配置文档。 |

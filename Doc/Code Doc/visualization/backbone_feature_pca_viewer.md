@@ -2,7 +2,7 @@
 
 ## 1. 文件职责
 
-`visualization/backbone_feature_pca_viewer.py` 负责对统一序列 Transformer 主干做 FP32 诊断可视化。它读取 B2D H5 样本，加载 `config/backbone.toml`，临时把主干、注意力和视觉嵌入精度覆盖为 FP32，可选从 checkpoint 加载真实训练权重，然后直接调用 `MonoDriveBackbone`，收集每层 Transformer 输出后的视觉 Token，并将每层特征图 PCA 到 RGB 后导出 PNG。同时，它会把模型检测、地图和轨迹输出转换为 ego 米制 BEV 诊断图，默认最多检查 48 个 Agent 查询和 48 个 Map 查询，但只绘制最高概率类别不是 `none` 的查询；另有轨迹诊断栏显示 256 维词表概率统计和 top-k 轨迹的 residual 修正。
+`visualization/backbone_feature_pca_viewer.py` 负责对统一序列 Transformer 主干做 FP32 诊断可视化。它读取 B2D H5 样本，加载 `config/backbone.toml`，临时把主干、注意力和视觉嵌入精度覆盖为 FP32，可选从 checkpoint 加载真实训练权重，然后直接调用 `MonoDriveBackbone`，收集每层 Transformer 输出后的视觉 Token，并将每层特征图 PCA 到 RGB 后导出 PNG。同时，它会把模型检测、地图和轨迹输出转换为 ego 米制 BEV 诊断图，默认最多检查 16 个 Agent 查询和 32 个 Map 查询，但只绘制最高概率类别不是 `none` 的查询；另有轨迹诊断栏显示 256 维词表概率统计和 top-k 轨迹的 residual 修正。
 
 该文件不复制主干、DINOv3、RoPE、检测头或轨迹词表逻辑。
 
@@ -24,14 +24,14 @@
 - 功能：保存主干 PCA 诊断图需要的元数据和统计张量。
 - Shape：
   - `images`: `[8, H, W, 3]`。
-  - `layer_pca_images`: `[12, 4, 288, 512, 3]`。
-  - `layer_token_norms`: `[12, 4, 18, 32]`。
+  - `layer_pca_images`: `[16, 4, 288, 512, 3]`。
+  - `layer_token_norms`: `[16, 4, 18, 32]`。
   - `model_outputs.trajectory_vocab_probabilities`: `[256]`。
   - `model_outputs.top_trajectory_points`: `[5, 6, 2]`。
   - `model_outputs.top_trajectory_residuals`: `[5, 6, 2]`。
   - `model_outputs.top_trajectory_corrections`: `[5, 6, 2]`。
-  - `model_outputs.agent_boxes`: `[A, 6]`，`A <= 48`。
-  - `model_outputs.map_points`: `[M, 100, 2]`，`M <= 48`。
+  - `model_outputs.agent_boxes`: `[A, 6]`，`A <= 16`。
+  - `model_outputs.map_points`: `[M, 100, 2]`，`M <= 32`。
 
 ### `ModelOutputVisualizationData`
 
@@ -66,15 +66,15 @@
 | `sample["images"]` | `[8, 3, 288, 512] float32` | 由 `B2DH5Dataset` 返回，值域 `[0, 1]`。 |
 | `sample["target_point"]` | `[2]` | ego 坐标系米制目标点。 |
 | `sample["ego_motion"]` | `[3]` | `[V_x, V_y, W]`。 |
-| `backbone_output.sequence_features` | `[1, 2662, 384]` | 统一主干输出。 |
-| `backbone_output.layer_vision_features` | 12 项 `[1, 2304, 384]` | 每层视觉 Token。 |
-| `layer_pca_images` | `[12, 4, 288, 512, 3]` | 每层每个 latent 时间片的 PCA RGB 图。 |
+| `backbone_output.sequence_features` | `[1, 2614, 384]` | 统一主干最终输出。 |
+| `backbone_output.layer_vision_features` | 16 项 `[1, 2304, 384]` | 每层视觉 Token。 |
+| `layer_pca_images` | `[16, 4, 288, 512, 3]` | 每层每个 latent 时间片的 PCA RGB 图。 |
 | `trajectory_vocab_probabilities` | `[256]` | 轨迹词表 softmax 概率，用于轨迹诊断栏的概率质量和熵统计。 |
 | `top_trajectory_points` | `[5, 6, 2]` | 轨迹 top-k，`vocab_symlog + residual * symlog_scale` 后反 Symlog 到米制。 |
 | `top_trajectory_residuals` | `[5, 6, 2]` | top-k 轨迹 raw residual，仍在模型 residual 输出空间。 |
 | `top_trajectory_corrections` | `[5, 6, 2]` | top-k 轨迹 residual 生效后的米制修正量，即修正后轨迹减词表基准轨迹。 |
-| `agent_boxes` | `[A, 6]` | Agent 查询，`A <= 48`；每个 query 先取包含 `none` 在内的类别 softmax argmax，若 argmax 为 `none` 则不绘制。 |
-| `map_points` | `[M, 100, 2]` | Map 查询，`M <= 48`；每个 query 先取包含 `none` 在内的类别 softmax argmax，若 argmax 为 `none` 则不绘制。 |
+| `agent_boxes` | `[A, 6]` | Agent 查询，`A <= 16`；每个 query 先取包含 `none` 在内的类别 softmax argmax，若 argmax 为 `none` 则不绘制。 |
+| `map_points` | `[M, 100, 2]` | Map 查询，`M <= 32`；每个 query 先取包含 `none` 在内的类别 softmax argmax，若 argmax 为 `none` 则不绘制。 |
 | 输出 PNG | image file | 主干诊断图。 |
 
 ## 5. 关键实现逻辑
@@ -99,8 +99,8 @@
 | `--output-dir` | 命令行默认 | 未指定 `--output` 时的输出目录，必须位于项目内。 |
 | `--device` | 命令行默认 | 运行设备。 |
 | `--trajectory-top-k` | `5` | 模型输出 BEV 面板绘制的轨迹 top-k 数量。 |
-| `--agent-top-k` | `48` | 模型输出 BEV 面板最多绘制的非 `none` Agent 查询数量。 |
-| `--map-top-k` | `48` | 模型输出 BEV 面板最多绘制的非 `none` Map 查询数量。 |
+| `--agent-top-k` | `16` | 模型输出 BEV 面板最多绘制的非 `none` Agent 查询数量。 |
+| `--map-top-k` | `32` | 模型输出 BEV 面板最多绘制的非 `none` Map 查询数量。 |
 
 ## 7. 依赖关系
 
@@ -118,13 +118,14 @@
 - Detection query 的显示类别来自该 query 在包含 `none` 的完整类别 softmax 上的 argmax；argmax 为 `none` 的 query 会被过滤，不进入 BEV 绘制。
 - 轨迹诊断栏的 `raw|max` 是 top-k residual 张量的绝对值最大值；`meter mean/max` 和 `final delta` 是 residual 生效后相对词表基准轨迹的米制修正。
 - `--checkpoint` 使用严格 `load_state_dict`，checkpoint 结构不匹配时应直接报错。
-- CPU 上运行会加载 DINOv3 和完整 12 层主干，可能耗时较长。
+- CPU 上运行会加载 DINOv3 和完整 16 层主干，可能耗时较长。
 - 修改主干输出、层特征收集或命令行参数时，必须同步更新摘要文档和 `doc/Code Doc/Index.md`。
 
 ## 9. 维护记录
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
+| 2026-06-08 | 1os3_Codex | AI 完成：同步 16 层主干、2614 序列长度和 Agent 16 / Map 32 默认展示数量。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：新增轨迹词表概率与 top-k residual 修正诊断栏，并记录 raw residual 与米制 correction。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：检测输出 BEV 面板过滤最高概率类别为 `none` 的 Agent/Map query。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：检测输出 BEV 面板改为每个 Agent/Map query 显示包含 `none` 在内的最高概率类别和概率。 |
