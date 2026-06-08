@@ -1,0 +1,71 @@
+[modules]
+backbone_config_path = "config/backbone.toml"
+training_data_config_path = "config/training_data.toml"
+
+[runtime]
+device = "auto"
+non_blocking = true
+
+[random]
+seed = 20260608
+deterministic = false
+
+[dataloader]
+batch_size = 1
+shuffle = true
+num_workers = 0
+pin_memory = true
+drop_last = false
+persistent_workers = false
+prefetch_factor = 2
+worker_seed_stride = 1000
+
+[optimization]
+optimizer = "adamw"
+initial_lr = 1e-5
+peak_lr = 1e-4
+min_lr = 1e-6
+warmup_steps = 5000
+total_steps = 100000
+cosine_decay_steps = 5000
+weight_decay = 0.01
+adam_beta1 = 0.9
+adam_beta2 = 0.999
+adam_eps = 1e-8
+enable_gradient_clipping = true
+max_grad_norm = 1.0
+zero_grad_set_to_none = true
+
+[loss_weights]
+trajectory_logit_bce = 1.0
+trajectory_residual_mse = 1.0
+agent_class_ce = 1.0
+agent_state_mse = 1.0
+agent_mode_ce = 1.0
+agent_future_mse = 1.0
+map_class_ce = 1.0
+map_point_mse = 1.0
+
+[gradient_monitor]
+enabled = true
+check_interval_steps = 1
+large_grad_norm = 100.0
+small_grad_norm = 1e-8
+max_report_parameters = 10
+fail_on_nonfinite = true
+log_missing_gradients = true
+
+[checkpoint]
+output_dir = "checkpoints/training"
+save_interval_steps = 1000
+keep_last = 3
+resume_from_latest = true
+resume_checkpoint_path = ""
+latest_filename = "latest.pt"
+save_on_exit = true
+save_rng_state = true
+
+[logging]
+output_dir = "logs/training"
+log_interval_steps = 10
+metrics_filename = "metrics.jsonl"

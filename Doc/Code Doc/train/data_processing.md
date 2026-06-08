@@ -21,8 +21,8 @@
 | `training_collate` | function | 将样本列表合并为 batch。 |
 | `build_training_batch_labels` | function | 从模型输出和 batch 构造全部训练标签。 |
 | `build_trajectory_vocab_labels` | function | 构造轨迹词表标签。 |
-| `build_agent_matching_targets` | function | 构造 Agent 匹配目标。 |
-| `build_map_matching_targets` | function | 构造 Map 匹配目标。 |
+| `build_agent_matching_targets` | function | 构造 Agent 匹配目标，并保留 winner mode 的逐点 future mask。 |
+| `build_map_matching_targets` | function | 构造 Map 匹配目标，并对无方向类别沿用匹配时误差更小的点序。 |
 | `symlog` / `inverse_symlog` | function | Symlog 正反变换。 |
 
 ## 3. 关键类和函数
@@ -46,7 +46,7 @@
 - 功能：把 Agent 预测反变换到物理空间并执行 Hungarian matching。
 - 输入：检测输出、batch、检测配置和训练数据配置。
 - 输出：Agent 分类、状态、mode、future 目标和匹配索引。
-- Shape：分类 `[B, 48]`，状态 `[B, 48, 11]`，future `[B, 48, 4, 6, 2]`。
+- Shape：分类 `[B, 48]`，状态 `[B, 48, 11]`，future `[B, 48, 4, 6, 2]`，future mask `[B, 48, 4, 6]`。
 
 ### `build_map_matching_targets`
 
@@ -67,6 +67,7 @@
 | `agent_class_logits` | `[B, 48, C_agent + 1]` | Agent 分类预测。 |
 | `agent_states` | `[B, 48, 11]` | Agent 监督空间状态预测。 |
 | `agent_future_trajectories` | `[B, 48, 4, 6, 2]` | Agent future Symlog 空间预测。 |
+| `agent_future_mask` | `[B, 48, 4, 6]` | 只在匹配 query 的 winner mode 和有效 future 点为真。 |
 | `map_points` | `[B, 48, 100, 2]` | Map 点 Symlog 空间预测。 |
 
 ## 5. 关键实现逻辑
@@ -75,9 +76,9 @@
 
 轨迹词表标签构造中，词表物理轨迹与 GT 轨迹在 ego meter 空间计算 MSE。MSE 取倒数、归一化到最大 logit 后 softmax，最后可把最大概率归一化为 1。winner 取物理空间 MSE 最小的词表项，残差目标为 `symlog(GT) - vocab_symlog[winner]`。
 
-Agent 匹配中，模型输出先恢复为 FP32 物理空间：位置、速度、加速度和 future 使用反 Symlog；尺寸使用 `expm1`；yaw 使用 sin/cos 向量 cost。匹配完成后，监督目标再写回模型训练空间。
+Agent 匹配中，模型输出先恢复为 FP32 物理空间：位置、速度、加速度和 future 使用反 Symlog；尺寸使用 `expm1`；yaw 使用 sin/cos 向量 cost。匹配完成后，监督目标再写回模型训练空间。Agent future mask 保留 H5 中 `[K]` 逐点有效性，只在匹配 query 的 winner mode 写入 `[K]` mask，避免 padding 未来点进入 loss。
 
-Map 匹配中，预测点反 Symlog 到 ego meter 空间计算点误差。`lane_divider` 和 `road_edge` 按配置视为点序正反等价，cost 取正向和反向的较小值；`centerline` 保留方向。
+Map 匹配中，预测点反 Symlog 到 ego meter 空间计算点误差。`lane_divider` 和 `road_edge` 按配置视为点序正反等价，cost 取正向和反向的较小值；`centerline` 保留方向。若无方向类别在匹配时反向点序误差更小，监督目标也会写入反向点序，保证 matching 和 loss 口径一致。
 
 ## 6. 配置项
 
@@ -105,3 +106,4 @@ Map 匹配中，预测点反 Symlog 到 ego meter 空间计算点误差。`lane_
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
 | 2026-06-07 | 1os3_Codex | AI 完成：新增训练数据处理模块，支持 H5 样本过滤、轨迹词表标签、Agent/Map Hungarian matching，并移除危险轨迹判断。 |
+| 2026-06-08 | 1os3_Codex | AI 完成：将 Agent future mask 改为 winner mode 逐点 mask，并让 Map 无方向类别监督沿用匹配时误差更小的点序。 |

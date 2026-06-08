@@ -158,7 +158,16 @@ class TrajectoryVocabLabels(NamedTuple):
 
 
 class AgentMatchingTargets(NamedTuple):
-    """Agent 匈牙利匹配和监督目标。"""
+    """Agent 匈牙利匹配和监督目标。
+
+    Shape:
+        `class_targets`: `[B, Q_agent]`。
+        `state_targets`: `[B, Q_agent, state_dim]`。
+        `state_mask`: `[B, Q_agent]`。
+        `mode_targets`: `[B, Q_agent]`。
+        `future_targets`: `[B, Q_agent, M, K, 2]`。
+        `future_mask`: `[B, Q_agent, M, K]`，只在匹配 query 的 winner mode 和有效未来点为真。
+    """
 
     class_targets: torch.Tensor
     state_targets: torch.Tensor
@@ -171,7 +180,13 @@ class AgentMatchingTargets(NamedTuple):
 
 
 class MapMatchingTargets(NamedTuple):
-    """Map 匈牙利匹配和监督目标。"""
+    """Map 匈牙利匹配和监督目标。
+
+    Shape:
+        `class_targets`: `[B, Q_map]`。
+        `point_targets`: `[B, Q_map, P, 2]`。
+        `point_mask`: `[B, Q_map]`。
+    """
 
     class_targets: torch.Tensor
     point_targets: torch.Tensor
@@ -445,7 +460,16 @@ def build_agent_matching_targets(
     state_mask = torch.zeros((batch_size, query_count), device=device, dtype=torch.bool)
     mode_targets = torch.zeros((batch_size, query_count), device=device, dtype=torch.long)
     future_targets = torch.zeros_like(detection_output.agent_future_trajectories, dtype=torch.float32)
-    future_mask = torch.zeros((batch_size, query_count), device=device, dtype=torch.bool)
+    future_mask = torch.zeros(
+        (
+            batch_size,
+            query_count,
+            detection_config.agent_future_mode_count,
+            detection_config.agent_future_points,
+        ),
+        device=device,
+        dtype=torch.bool,
+    )
     matched_query_indices: list[torch.Tensor] = []
     matched_gt_indices: list[torch.Tensor] = []
 
@@ -522,7 +546,10 @@ def build_agent_matching_targets(
         future_targets[batch_index, query_indices, winner_modes] = symlog(
             gt_future[batch_index, gt_indices]
         )
-        future_mask[batch_index, query_indices] = gt_future_valid[batch_index, gt_indices].any(dim=1)
+        future_mask[batch_index, query_indices, winner_modes] = gt_future_valid[
+            batch_index,
+            gt_indices,
+        ]
 
     return AgentMatchingTargets(
         class_targets=class_targets,
@@ -574,7 +601,7 @@ def build_map_matching_targets(
 
         gt_class = gt_classes[batch_index, valid_gt_indices].clamp(min=0, max=none_index - 1)
         class_cost = class_cost_source[batch_index][:, gt_class]
-        point_cost = _map_point_cost(
+        point_cost, reverse_target_mask = _map_point_cost(
             pred_points[batch_index],
             gt_points[batch_index, valid_gt_indices],
             gt_class,
@@ -592,7 +619,15 @@ def build_map_matching_targets(
             min=0,
             max=none_index - 1,
         )
-        point_targets[batch_index, query_indices] = symlog(gt_points[batch_index, gt_indices])
+        matched_points = gt_points[batch_index, gt_indices]
+        matched_reverse_mask = reverse_target_mask[query_indices, local_gt_indices]
+        if bool(matched_reverse_mask.any().item()):
+            matched_points = matched_points.clone()
+            matched_points[matched_reverse_mask] = torch.flip(
+                matched_points[matched_reverse_mask],
+                dims=(1,),
+            )
+        point_targets[batch_index, query_indices] = symlog(matched_points)
         point_mask[batch_index, query_indices] = True
 
     return MapMatchingTargets(
@@ -709,10 +744,11 @@ def _map_point_cost(
     gt_points_m: torch.Tensor,
     gt_classes: torch.Tensor,
     bidirectional_class_indices: set[int],
-) -> torch.Tensor:
+) -> tuple[torch.Tensor, torch.Tensor]:
     forward_cost = (pred_points_m[:, None, :, :] - gt_points_m[None, :, :, :]).abs().mean(dim=(2, 3))
+    reverse_target_mask = torch.zeros_like(forward_cost, dtype=torch.bool)
     if not bidirectional_class_indices:
-        return forward_cost
+        return forward_cost, reverse_target_mask
     reverse_cost = (
         pred_points_m[:, None, :, :] - torch.flip(gt_points_m, dims=(1,))[None, :, :, :]
     ).abs().mean(dim=(2, 3))
@@ -721,7 +757,13 @@ def _map_point_cost(
         device=gt_classes.device,
         dtype=torch.bool,
     )
-    return torch.where(bidirectional_mask[None, :], torch.minimum(forward_cost, reverse_cost), forward_cost)
+    reverse_target_mask = bidirectional_mask[None, :] & (reverse_cost < forward_cost)
+    point_cost = torch.where(
+        bidirectional_mask[None, :],
+        torch.minimum(forward_cost, reverse_cost),
+        forward_cost,
+    )
+    return point_cost, reverse_target_mask
 
 
 def _encode_agent_state_targets(

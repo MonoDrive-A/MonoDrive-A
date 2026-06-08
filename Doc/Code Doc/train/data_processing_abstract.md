@@ -14,8 +14,8 @@
 | `training_collate` | function | 合并 batch。 |
 | `build_training_batch_labels` | function | 构造全部训练标签。 |
 | `build_trajectory_vocab_labels` | function | 构造轨迹词表 soft label 和残差目标。 |
-| `build_agent_matching_targets` | function | 构造 Agent 匹配目标。 |
-| `build_map_matching_targets` | function | 构造 Map 匹配目标。 |
+| `build_agent_matching_targets` | function | 构造 Agent 匹配目标和 winner mode 逐点 future mask。 |
+| `build_map_matching_targets` | function | 构造 Map 匹配目标，并对无方向类别沿用最小误差点序。 |
 
 ## 3. Shape 概览
 
@@ -25,6 +25,7 @@
 | 轨迹残差目标 | `[B, V, 6, 2]` | 只监督 winner 轨迹。 |
 | Agent 分类目标 | `[B, 48]` | 未匹配 query 为 none。 |
 | Agent 状态目标 | `[B, 48, 11]` | 匹配后写回监督空间。 |
+| Agent future mask | `[B, 48, 4, 6]` | 只监督 winner mode 中有效 future 点。 |
 | Map 分类目标 | `[B, 48]` | 未匹配 query 为 none。 |
 | Map 点目标 | `[B, 48, 100, 2]` | 匹配后写回 Symlog 空间。 |
 
@@ -43,9 +44,11 @@
 - 修改模型输出 shape 后必须同步本文件和代码文档。
 - 修改配置字段后必须同步 `config/training_data.toml` 文档。
 - Hungarian cost 新增项必须说明其物理空间单位和监督空间回写方式。
+- 无方向 Map 类别的正反点序选择必须保持 matching 和 loss 目标一致。
 
 ## 7. 维护记录
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
 | 2026-06-07 | 1os3_Codex | AI 完成：新增训练数据处理模块摘要。 |
+| 2026-06-08 | 1os3_Codex | AI 完成：更新 Agent future 逐点 mask 和 Map 正反点序监督摘要。 |
