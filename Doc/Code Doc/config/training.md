@@ -41,7 +41,7 @@
 
 轨迹词表概率监督使用 `trajectory_logit_soft_ce` 权重，对模型 raw logits 使用 soft cross entropy。标签由 `train/data_processing.py` 在物理空间按 inverse-MSE 构造，并保持为和为 1 的概率分布。
 
-Agent / Map 分类 CE 可通过 `[detection_class_weights]` 控制 none 与 non-none 组的相对权重。默认 `mode = "auto"` 时，`train/losses.py` 按当前 batch 分类目标数量动态平衡两组权重；`mode = "manual"` 时使用配置中的手动权重；`mode = "disabled"` 时保持未加类别权重的 CE。
+Agent / Map 分类 CE 可通过 `[detection_class_weights]` 控制 none 与 non-none 组的相对权重。默认 `mode = "auto"` 时，`train/losses.py` 按当前 batch 的 raw logits 估算未加权 CE 对 logits 的梯度范数，并让 non-none 组获得 `auto_non_none_gradient_mass` 指定的组级梯度预算；`mode = "manual"` 时使用配置中的手动权重；`mode = "disabled"` 时保持未加类别权重的 CE。
 
 ## 6. 配置项
 
@@ -65,6 +65,7 @@ Agent / Map 分类 CE 可通过 `[detection_class_weights]` 控制 none 与 non-
 | `detection_class_weights.map_none_weight` | `1.0` | 手动模式下 Map none 类别权重。 |
 | `detection_class_weights.auto_min_weight` | `0.1` | 自动模式下动态类别权重下限。 |
 | `detection_class_weights.auto_max_weight` | `10.0` | 自动模式下动态类别权重上限。 |
+| `detection_class_weights.auto_non_none_gradient_mass` | `0.25` | 自动模式下 non-none 组目标 logits 梯度预算比例。 |
 | `gradient_monitor.*` | 见配置文件 | 梯度范数监测阈值和报告数量。 |
 | `checkpoint.output_dir` | `checkpoints/training` | checkpoint 保存目录。 |
 | `logging.output_dir` | `logs/training` | 指标日志目录。 |
@@ -79,12 +80,13 @@ Agent / Map 分类 CE 可通过 `[detection_class_weights]` 控制 none 与 non-
 - 输出目录必须位于项目目录内，且不应提交 checkpoint、日志或训练中间产物。
 - 本文件不重复配置 DINOv3、3D Conv、Transformer、检测头或轨迹词表的结构默认值。
 - 轨迹词表分数使用 soft CE；Agent / Map 分类和 Agent mode 使用 hard-label CE。
-- 检测分类自动类别权重是 batch 级动态口径，不会读取或写入额外统计文件。
+- 检测分类自动类别权重是 batch 级 logits 梯度预算口径，不会读取或写入额外统计文件。
 
 ## 9. 维护记录
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
+| 2026-06-08 | 1os3_Codex | AI 完成：自动检测分类权重改为按当前 logits CE 梯度预算调整，默认 non-none 预算为 0.25。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：新增检测分类 none / non-none 类别权重配置，默认自动调整。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：轨迹词表概率 loss 从 BCE 改为 soft CE，并同步 loss 权重字段名。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：新增训练主流程配置。 |

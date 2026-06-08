@@ -54,6 +54,7 @@ map_non_none_weight = 1.0
 map_none_weight = 1.0
 auto_min_weight = 0.1
 auto_max_weight = 10.0
+auto_non_none_gradient_mass = 0.25
 
 [gradient_monitor]
 enabled = true

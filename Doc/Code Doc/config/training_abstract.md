@@ -20,7 +20,7 @@
 
 ## 4. 使用规范
 
-训练入口通过 `load_training_run_config` 读取本文件。配置路径和输出目录必须解析到项目目录内。检测分类类别权重默认 `mode = "auto"`，也可切换为 `manual` 或 `disabled`。
+训练入口通过 `load_training_run_config` 读取本文件。配置路径和输出目录必须解析到项目目录内。检测分类类别权重默认 `mode = "auto"`，按 logits 梯度预算动态调整，也可切换为 `manual` 或 `disabled`。
 
 ## 5. 最小示例
 
@@ -31,12 +31,13 @@
 - 不在本文件重复已有模型结构默认值。
 - 修改训练配置字段时，同步 `train/training_config.py` 和本文档。
 - 轨迹词表概率 loss 使用 soft cross entropy，标签为和为 1 的 inverse-MSE soft label。
-- 检测分类自动类别权重按当前 batch 的 none / non-none 目标数量动态计算。
+- 检测分类自动类别权重按当前 batch 的 none / non-none logits 梯度预算动态计算，默认 non-none 预算比例为 `0.25`。
 
 ## 7. 维护记录
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
+| 2026-06-08 | 1os3_Codex | AI 完成：同步自动检测分类 logits 梯度预算配置摘要。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：同步检测分类 none / non-none 类别权重配置摘要。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：同步轨迹词表 soft CE loss 口径。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：新增训练主配置摘要。 |

@@ -237,6 +237,7 @@ def _detection_class_cross_entropy(
         )
 
     class_weight = _build_detection_class_weight(
+        logits=flat_logits,
         targets=flat_targets,
         class_count=class_count,
         none_index=none_index,
@@ -248,6 +249,7 @@ def _detection_class_cross_entropy(
 
 
 def _build_detection_class_weight(
+    logits: torch.Tensor,
     targets: torch.Tensor,
     class_count: int,
     none_index: int,
@@ -266,6 +268,7 @@ def _build_detection_class_weight(
             device=targets.device,
         )
     return _auto_detection_class_weight(
+        logits=logits,
         targets=targets,
         class_count=class_count,
         none_index=none_index,
@@ -291,19 +294,38 @@ def _constant_detection_class_weight(
 
 
 def _auto_detection_class_weight(
+    logits: torch.Tensor,
     targets: torch.Tensor,
     class_count: int,
     none_index: int,
     weight_config: DetectionClassWeightConfig,
 ) -> torch.Tensor | None:
-    none_count = int((targets == none_index).sum().item())
+    none_mask = targets == none_index
+    none_count = int(none_mask.sum().item())
     non_none_count = int(targets.numel()) - none_count
     if none_count == 0 or non_none_count == 0:
         return None
 
-    total_count = float(none_count + non_none_count)
-    non_none_weight = total_count / (2.0 * float(non_none_count))
-    none_weight = total_count / (2.0 * float(none_count))
+    gradient_norm = _cross_entropy_logit_gradient_norm(logits.detach(), targets)
+    none_gradient_sum = gradient_norm[none_mask].sum()
+    non_none_gradient_sum = gradient_norm[~none_mask].sum()
+    if not bool((none_gradient_sum > 0.0).item()) or not bool(
+        (non_none_gradient_sum > 0.0).item()
+    ):
+        return None
+
+    non_none_mass = weight_config.auto_non_none_gradient_mass
+    none_mass = 1.0 - non_none_mass
+    non_none_weight = non_none_mass / float(non_none_gradient_sum.item())
+    none_weight = none_mass / float(none_gradient_sum.item())
+    total_count = float(targets.numel())
+    mean_sample_weight = (
+        non_none_weight * float(non_none_count) + none_weight * float(none_count)
+    ) / total_count
+    if mean_sample_weight <= 0.0:
+        return None
+    non_none_weight = non_none_weight / mean_sample_weight
+    none_weight = none_weight / mean_sample_weight
     class_weight = _constant_detection_class_weight(
         class_count=class_count,
         none_index=none_index,
@@ -315,6 +337,16 @@ def _auto_detection_class_weight(
         min=weight_config.auto_min_weight,
         max=weight_config.auto_max_weight,
     )
+
+
+def _cross_entropy_logit_gradient_norm(
+    logits: torch.Tensor,
+    targets: torch.Tensor,
+) -> torch.Tensor:
+    probabilities = torch.softmax(logits.to(dtype=torch.float32), dim=-1)
+    target_probabilities = probabilities.gather(dim=1, index=targets.unsqueeze(1)).squeeze(1)
+    squared_norm = probabilities.square().sum(dim=1) - 2.0 * target_probabilities + 1.0
+    return squared_norm.clamp_min(0.0).sqrt()
 
 
 def _weighted_cross_entropy(

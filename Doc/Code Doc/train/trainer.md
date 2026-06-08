@@ -67,13 +67,14 @@
 - 模块级训练入口不额外开启全局 BF16 autocast，精度边界由模型子模块内部和配置控制。
 - DINOv3 必须冻结；若发现 DINOv3 参数可训练，会直接抛出异常。
 - 断点恢复首个 epoch 不应通过迭代 DataLoader 再 `continue` 跳过历史 batch，否则会重新读取 H5、执行校验和 collate，造成恢复阶段 CPU 与 I/O 压力。
-- 检测分类自动类别权重在 loss 内按当前 batch 标签计算，训练入口只负责传递配置。
+- 检测分类自动类别权重在 loss 内按当前 batch 标签和 raw logits 的 CE 梯度范数计算，训练入口只负责传递配置。
 - `--max-steps` 仅作为 smoke test 或临时调试覆盖，不改变 TOML 中的真实训练计划。
 
 ## 9. 维护记录
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
+| 2026-06-08 | 1os3_Codex | AI 完成：同步检测分类自动权重改为 logits 梯度预算口径。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：训练入口向 loss 模块传入检测分类 none / non-none 类别权重配置。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：断点恢复时按 batch index 切分 sampler，避免读取并丢弃已完成 batch。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：新增训练主入口、学习率调度、自动保存和断点恢复。 |

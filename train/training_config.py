@@ -158,6 +158,7 @@ class DetectionClassWeightConfig:
     map_none_weight: float
     auto_min_weight: float
     auto_max_weight: float
+    auto_non_none_gradient_mass: float
 
     def __post_init__(self) -> None:
         if self.mode not in SUPPORTED_DETECTION_CLASS_WEIGHT_MODES:
@@ -186,6 +187,11 @@ class DetectionClassWeightConfig:
             raise ValueError(
                 "auto_min_weight 不能大于 auto_max_weight，"
                 f"实际为 {self.auto_min_weight} 和 {self.auto_max_weight}。"
+            )
+        if not 0.0 < self.auto_non_none_gradient_mass < 1.0:
+            raise ValueError(
+                "auto_non_none_gradient_mass 必须位于 (0, 1)，"
+                f"实际为 {self.auto_non_none_gradient_mass}。"
             )
 
 
@@ -391,6 +397,10 @@ def load_training_run_config(
             map_none_weight=_require_float(detection_class_weights_config, "map_none_weight"),
             auto_min_weight=_require_float(detection_class_weights_config, "auto_min_weight"),
             auto_max_weight=_require_float(detection_class_weights_config, "auto_max_weight"),
+            auto_non_none_gradient_mass=_require_float(
+                detection_class_weights_config,
+                "auto_non_none_gradient_mass",
+            ),
         ),
         gradient_monitor=GradientMonitorConfig(
             enabled=_require_bool(gradient_monitor_config, "enabled"),
