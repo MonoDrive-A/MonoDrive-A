@@ -124,6 +124,19 @@ def run_training(
         project_root=run_config.project_root,
     )
     dataset = build_training_dataset(data_config)
+    expected_steps_per_epoch = _expected_steps_per_epoch(
+        len(dataset),
+        run_config.dataloader.batch_size,
+        run_config.dataloader.drop_last,
+    )
+    print(
+        "训练数据概览："
+        f"样本数={len(dataset)}, "
+        f"batch_size={run_config.dataloader.batch_size}, "
+        f"drop_last={run_config.dataloader.drop_last}, "
+        f"预期每个 epoch 步数={expected_steps_per_epoch}",
+        flush=True,
+    )
     model = MonoDriveBackbone(backbone_config).to(device)
     _ensure_dinov3_frozen(model)
     optimizer = _build_optimizer(model, run_config.optimization)
@@ -307,6 +320,16 @@ def _build_optimizer(model: MonoDriveBackbone, config: OptimizationConfig) -> Op
         eps=config.adam_eps,
         weight_decay=config.weight_decay,
     )
+
+
+def _expected_steps_per_epoch(dataset_length: int, batch_size: int, drop_last: bool) -> int:
+    if dataset_length < 0:
+        raise ValueError(f"dataset_length 不能为负数，实际为 {dataset_length}。")
+    if batch_size <= 0:
+        raise ValueError(f"batch_size 必须为正整数，实际为 {batch_size}。")
+    if drop_last:
+        return dataset_length // batch_size
+    return math.ceil(dataset_length / batch_size)
 
 
 def _build_data_loader(

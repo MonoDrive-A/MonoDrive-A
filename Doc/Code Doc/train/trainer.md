@@ -41,7 +41,7 @@
 
 ## 5. 关键实现逻辑
 
-训练入口先读取 `config/training.toml`，再读取主干和训练数据配置。模型构建后会显式检查 DINOv3 是否冻结；优化器只接收 `requires_grad=True` 参数，因此冻结 DINOv3 不参与反向更新。
+训练入口先读取 `config/training.toml`，再读取主干和训练数据配置。Dataset 构建完成后，会打印样本数、batch size、`drop_last` 和预期每个 epoch 的 step 数。模型构建后会显式检查 DINOv3 是否冻结；优化器只接收 `requires_grad=True` 参数，因此冻结 DINOv3 不参与反向更新。
 
 每步训练流程为：设置学习率、搬运 batch 到设备、模型前向、构造训练标签、计算 FP32 loss、反向、梯度监测、可选梯度裁剪、优化器更新、日志记录和按间隔保存 checkpoint。
 
@@ -72,3 +72,4 @@
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
 | 2026-06-08 | 1os3_Codex | AI 完成：新增训练主入口、学习率调度、自动保存和断点恢复。 |
+| 2026-06-08 | 1os3_Codex | AI 完成：训练开始前打印数据集规模和预期单个 epoch step 数。 |
