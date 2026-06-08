@@ -45,7 +45,7 @@
 
 每步训练流程为：设置学习率、搬运 batch 到设备、模型前向、构造训练标签、计算 FP32 loss、反向、梯度监测、可选梯度裁剪、优化器更新、日志记录和按间隔保存 checkpoint。
 
-断点恢复会加载模型、优化器、调度器、global step、epoch、batch index 和 RNG 状态。DataLoader 以 epoch seed 重建，并通过 batch index 跳过恢复点之前的 batch。
+断点恢复会加载模型、优化器、调度器、global step、epoch、batch index 和 RNG 状态。DataLoader 以 epoch seed 重建同一份样本顺序，并在构建首个恢复 epoch 的 sampler 时按 `batch_index * batch_size` 切掉已完成样本，避免重新读取和 collate 恢复点之前的 batch。
 
 ## 6. 配置项
 
@@ -65,11 +65,13 @@
 
 - 模块级训练入口不额外开启全局 BF16 autocast，精度边界由模型子模块内部和配置控制。
 - DINOv3 必须冻结；若发现 DINOv3 参数可训练，会直接抛出异常。
+- 断点恢复首个 epoch 不应通过迭代 DataLoader 再 `continue` 跳过历史 batch，否则会重新读取 H5、执行校验和 collate，造成恢复阶段 CPU 与 I/O 压力。
 - `--max-steps` 仅作为 smoke test 或临时调试覆盖，不改变 TOML 中的真实训练计划。
 
 ## 9. 维护记录
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
+| 2026-06-08 | 1os3_Codex | AI 完成：断点恢复时按 batch index 切分 sampler，避免读取并丢弃已完成 batch。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：新增训练主入口、学习率调度、自动保存和断点恢复。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：训练开始前打印数据集规模和预期单个 epoch step 数。 |

@@ -171,11 +171,15 @@ def run_training(
 
     try:
         while global_step < target_steps:
-            data_loader = _build_data_loader(dataset, run_config, epoch, device)
+            data_loader = _build_data_loader(
+                dataset,
+                run_config,
+                epoch,
+                device,
+                start_batch_index=start_batch_index,
+            )
             epoch_finished = True
-            for batch_index, batch in enumerate(data_loader):
-                if batch_index < start_batch_index:
-                    continue
+            for batch_index, batch in enumerate(data_loader, start=start_batch_index):
                 if global_step >= target_steps:
                     epoch_finished = False
                     break
@@ -337,23 +341,48 @@ def _build_data_loader(
     run_config: TrainingRunConfig,
     epoch: int,
     device: torch.device,
+    start_batch_index: int = 0,
 ) -> DataLoader[dict[str, Any]]:
-    generator = torch.Generator()
-    generator.manual_seed(run_config.random.seed + epoch)
+    if start_batch_index < 0:
+        raise ValueError(f"start_batch_index 必须为非负整数，实际为 {start_batch_index}。")
+    sample_indices = _build_epoch_sample_indices(
+        dataset_length=len(dataset),
+        batch_size=run_config.dataloader.batch_size,
+        shuffle=run_config.dataloader.shuffle,
+        seed=run_config.random.seed + epoch,
+        start_batch_index=start_batch_index,
+    )
     dataloader_kwargs: dict[str, Any] = {
         "batch_size": run_config.dataloader.batch_size,
-        "shuffle": run_config.dataloader.shuffle,
+        "shuffle": False,
+        "sampler": sample_indices,
         "num_workers": run_config.dataloader.num_workers,
         "pin_memory": run_config.dataloader.pin_memory and device.type == "cuda",
         "drop_last": run_config.dataloader.drop_last,
         "collate_fn": training_collate,
-        "generator": generator,
     }
     if run_config.dataloader.num_workers > 0:
         dataloader_kwargs["persistent_workers"] = run_config.dataloader.persistent_workers
         dataloader_kwargs["prefetch_factor"] = run_config.dataloader.prefetch_factor
         dataloader_kwargs["worker_init_fn"] = _build_worker_init_fn(run_config, epoch)
     return DataLoader(dataset, **dataloader_kwargs)
+
+
+def _build_epoch_sample_indices(
+    dataset_length: int,
+    batch_size: int,
+    shuffle: bool,
+    seed: int,
+    start_batch_index: int,
+) -> list[int]:
+    if shuffle:
+        generator = torch.Generator()
+        generator.manual_seed(seed)
+        sample_indices = torch.randperm(dataset_length, generator=generator).tolist()
+    else:
+        sample_indices = list(range(dataset_length))
+    start_sample_index = min(start_batch_index * batch_size, dataset_length)
+    return sample_indices[start_sample_index:]
 
 
 def _build_worker_init_fn(run_config: TrainingRunConfig, epoch: int) -> Any:
