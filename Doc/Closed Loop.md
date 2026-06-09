@@ -40,7 +40,7 @@ cd F:\MonoDrive
 
 闭环 agent 与 [`data/b2d_dataset.py`](../data/b2d_dataset.py) 使用相同约定：
 
-- 图像：最近 **8** 帧，1600×900 → 288×512，值域 `[0, 1]`，ImageNet 归一化在模型内部完成。
+- 图像：最近 **8** 帧，默认 **800×450** Carla 相机（可 `--camera-full-res` 切回 1600×900）→ 288×512，值域 `[0, 1]`。
 - `ego_motion`：`[Vx, Vy, W]`，anchor 帧 ego-local 物理量。
 - `target_point`：anchor 帧 ego-local 目标点 (m)。
 - 轨迹输出：256 路词表 + 残差，6 点 @ 2Hz（相邻点间隔 0.5 s）。

@@ -27,7 +27,8 @@ import torch.nn.functional as F
 # ─────────────────────────────────────────────────────────────
 # 图像 / ego buffer 常量（与训练对齐）
 # ─────────────────────────────────────────────────────────────
-SOURCE_HW = (900, 1600)  # Carla 摄像头原始分辨率 (H, W)
+SOURCE_HW = (900, 1600)  # B2D 训练采集分辨率 (H, W)，仅作参考
+DEFAULT_CAMERA_HW = (450, 800)  # 闭环默认 Carla 相机 (H, W)，低于训练分辨率以减轻渲染负担
 MODEL_HW = (288, 512)    # 模型输入分辨率 (H, W)，与 config/vision_embedding.toml 一致
 FINAL_HW = MODEL_HW
 PAST_FRAMES = 8
@@ -61,10 +62,15 @@ def wrap_pi(x: float | np.ndarray) -> float | np.ndarray:
 # Frame buffer
 # ─────────────────────────────────────────────────────────────
 class FrameBuffer:
-    """最近 ``maxlen`` 帧前视图像，FP32 [0,1] (3, 288, 512)。"""
+    """最近 ``maxlen`` 帧前视图像，FP32 [0,1] (3, H, W)；内部统一 resize 到 ``MODEL_HW``。"""
 
-    def __init__(self, maxlen: int = PAST_FRAMES) -> None:
+    def __init__(
+        self,
+        maxlen: int = PAST_FRAMES,
+        source_hw: tuple[int, int] | None = DEFAULT_CAMERA_HW,
+    ) -> None:
         self.maxlen = maxlen
+        self.source_hw = source_hw
         self._buf: Deque[torch.Tensor] = deque(maxlen=maxlen)
 
     def __len__(self) -> int:
@@ -88,10 +94,10 @@ class FrameBuffer:
             rgb = bgra
         else:
             raise ValueError(f"期望 (H,W,3|4)，当前 shape={bgra.shape}")
-        if rgb.shape[:2] != SOURCE_HW:
+        if self.source_hw is not None and rgb.shape[:2] != self.source_hw:
             raise ValueError(
-                f"摄像头输出分辨率 {rgb.shape[:2]} != 期望 {SOURCE_HW}; "
-                "请确保 sensor.camera.rgb 设置 image_size_x=1600, image_size_y=900"
+                f"摄像头输出分辨率 {rgb.shape[:2]} != 期望 {self.source_hw}; "
+                f"请与 attach_front_camera 的 height/width 一致"
             )
         t = (
             torch.from_numpy(rgb).to(torch.float32)

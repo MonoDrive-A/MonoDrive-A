@@ -187,6 +187,15 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--mp4", default=None,
                    help="MP4 输出路径；不传则不录制视频。")
 
+    p.add_argument("--camera-width", type=int, default=800,
+                   help="前视 RGB 相机宽度（像素）；降低可减轻 Carla 渲染与录像开销")
+    p.add_argument("--camera-height", type=int, default=450,
+                   help="前视 RGB 相机高度（像素）")
+    p.add_argument(
+        "--camera-full-res", action="store_true",
+        help="使用 B2D 训练采集分辨率 1600×900（默认 800×450）",
+    )
+
     # ── 纵向控制方案 ──
     p.add_argument(
         "--long-mode", choices=["speed", "accel", "ff_pid", "traj_diff"], default="traj_diff",
@@ -533,11 +542,11 @@ def spawn_ego(
 def attach_front_camera(
     world: carla.World,
     parent: carla.Vehicle,
-    width: int = 1600,
-    height: int = 900,
+    width: int = 800,
+    height: int = 450,
     fov: float = 120.0,
 ) -> carla.Sensor:
-    """挂前视 RGB 摄像头，分辨率与训练数据集对齐：1600×900, FOV=120°。"""
+    """挂前视 RGB 摄像头。默认 800×450；模型侧仍会 resize 到 288×512。"""
     bp_lib = world.get_blueprint_library()
     bp = bp_lib.find("sensor.camera.rgb")
     bp.set_attribute("image_size_x", str(width))
@@ -568,6 +577,16 @@ def main() -> int:
         Mp4Recorder,
         draw_overlay_on_frame,
     )
+
+    if args.camera_full_res:
+        camera_width, camera_height = 1600, 900
+    else:
+        camera_width = int(args.camera_width)
+        camera_height = int(args.camera_height)
+    if camera_width <= 0 or camera_height <= 0:
+        logger.error("camera 分辨率必须为正数，实际 %dx%d", camera_width, camera_height)
+        return 1
+    logger.info("相机 / MP4 分辨率: %dx%d", camera_width, camera_height)
 
     if args.seed is None:
         seed = int(time.time() * 1000) % (2**31)
@@ -667,7 +686,10 @@ def main() -> int:
         world.tick()
 
         # ── 摄像头 ──
-        camera = attach_front_camera(world, ego_vehicle, width=1600, height=900, fov=120.0)
+        camera = attach_front_camera(
+            world, ego_vehicle,
+            width=camera_width, height=camera_height, fov=120.0,
+        )
         camera.listen(lambda image: image_q.put(image))
         # 摄像头第一帧会在第一个 tick 之后入队
 
@@ -693,6 +715,8 @@ def main() -> int:
             checkpoint=args.checkpoint,
             backbone_config_path=args.backbone_config,
             viz_top_k=args.viz_top_k,
+            camera_width=camera_width,
+            camera_height=camera_height,
             device=args.device,
             dt=0.125,
             long_mode=args.long_mode,
@@ -759,11 +783,13 @@ def main() -> int:
             )
 
         # 2D overlay 投影器（无论是否录 MP4 都先备好；overlay 只在 --mp4 且未禁用时启用）
-        projector = CameraProjector(width=1600, height=900, fov_deg=120.0)
+        projector = CameraProjector(width=camera_width, height=camera_height, fov_deg=120.0)
         do_mp4_overlay = bool(args.mp4) and not args.no_viz and not args.no_mp4_overlay
 
         if args.mp4:
-            recorder = Mp4Recorder(args.mp4, fps=8, size=(1600, 900), fourcc="mp4v")
+            recorder = Mp4Recorder(
+                args.mp4, fps=8, size=(camera_width, camera_height), fourcc="mp4v",
+            )
             recorder.open()
             if do_mp4_overlay:
                 logger.info("MP4 启用 2D overlay（模型看不到，只叠加在录像帧上）")

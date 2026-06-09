@@ -269,6 +269,8 @@ class MonoDriveAgent:
         checkpoint: Optional[str] = None,
         backbone_config_path: str = "config/backbone.toml",
         viz_top_k: int = 8,
+        camera_width: int = 800,
+        camera_height: int = 450,
         device: str = "cuda",
         dt: float = 0.125,
         look_ahead_step: int = 2,                # 旧参数，仅在 use_pure_pursuit=False 时生效
@@ -304,6 +306,8 @@ class MonoDriveAgent:
             checkpoint: 训练 checkpoint 路径（含 ``model_state``）；None 时随机初始化
             backbone_config_path: 主干 TOML 配置路径（相对项目根）
             viz_top_k: 可视化 / 诊断导出的 top-k 候选数
+            camera_width: Carla RGB 相机宽度（像素），默认 800
+            camera_height: Carla RGB 相机高度（像素），默认 450
             device: 推理设备 "cuda" / "cpu"
             dt: Carla tick 周期（秒），8 FPS = 0.125s
             look_ahead_step: 用 winner 物理轨迹的第几步做横向 PID 目标（默认 step=2，约 0.25s 后）
@@ -424,6 +428,12 @@ class MonoDriveAgent:
         self.diagnostic_dir = Path(diagnostic_dir).expanduser().resolve() if diagnostic_dir else None
         self.diagnostic_every = max(1, int(diagnostic_every))
         self.viz_top_k = max(1, int(viz_top_k))
+        self.camera_width = int(camera_width)
+        self.camera_height = int(camera_height)
+        if self.camera_width <= 0 or self.camera_height <= 0:
+            raise ValueError(
+                f"camera 分辨率必须为正数，实际为 {self.camera_width}x{self.camera_height}"
+            )
         self.backbone_config_path = str(backbone_config_path)
         self._current_tick: int = 0
         self._infer_counter: int = 0
@@ -447,7 +457,10 @@ class MonoDriveAgent:
         self.model = self._load_model(checkpoint)
 
         # buffers
-        self.frame_buf = FrameBuffer(maxlen=PAST_FRAMES)
+        self.frame_buf = FrameBuffer(
+            maxlen=PAST_FRAMES,
+            source_hw=(self.camera_height, self.camera_width),
+        )
         self.ego_buf = EgoBuffer(maxlen=PAST_FRAMES)
         self.ego_buf.set_dt(self.dt)
 
