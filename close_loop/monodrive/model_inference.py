@@ -35,18 +35,37 @@ def inverse_symlog(values: torch.Tensor) -> torch.Tensor:
     return torch.sign(values) * torch.expm1(torch.abs(values))
 
 
+def _decode_symlog_trajectories(
+    vocab_symlog: torch.Tensor,
+    symlog_scale: torch.Tensor,
+    residuals: torch.Tensor,
+    indices: torch.Tensor,
+) -> torch.Tensor:
+    """按 ``indices`` 组合词表 Symlog + 残差，返回物理轨迹 ``(N, K, 2)``。"""
+    selected_vocab = vocab_symlog.index_select(0, indices)
+    selected_residuals = residuals.index_select(0, indices)
+    selected_symlog = selected_vocab + selected_residuals * symlog_scale
+    return inverse_symlog(selected_symlog)
+
+
 def decode_winner_trajectory(
     backbone_output: MonoDriveBackboneOutput,
     model: MonoDriveBackbone,
     winner_idx: int,
 ) -> np.ndarray:
     """解码指定词表索引的物理轨迹 ``(K, 2)``。"""
-    residuals = backbone_output.trajectory_output.residuals[0].to(dtype=torch.float32)
-    vocab_symlog = model.vocabulary.trajectory_vocab_symlog.to(dtype=torch.float32)
-    symlog_scale = model.vocabulary.symlog_scale.to(dtype=torch.float32)
-    idx = int(winner_idx)
-    selected_symlog = vocab_symlog[idx] + residuals[idx] * symlog_scale
-    return inverse_symlog(selected_symlog).detach().cpu().numpy()
+    logits = backbone_output.trajectory_output.logits[0]
+    device = logits.device
+    residuals = backbone_output.trajectory_output.residuals[0].to(
+        device=device, dtype=torch.float32,
+    )
+    vocab_symlog = model.vocabulary.trajectory_vocab_symlog.to(
+        device=device, dtype=torch.float32,
+    )
+    symlog_scale = model.vocabulary.symlog_scale.to(device=device, dtype=torch.float32)
+    idx = torch.tensor([int(winner_idx)], device=device, dtype=torch.long)
+    traj = _decode_symlog_trajectories(vocab_symlog, symlog_scale, residuals, idx)
+    return traj[0].detach().cpu().numpy()
 
 
 def decode_trajectories(
@@ -56,19 +75,23 @@ def decode_trajectories(
 ) -> TrajectoryDecodeResult:
     """从 backbone 输出解码全词表概率、winner 与 top-k 候选轨迹。"""
     logits = backbone_output.trajectory_output.logits[0].to(dtype=torch.float32)
-    residuals = backbone_output.trajectory_output.residuals[0].to(dtype=torch.float32)
-    vocab_symlog = model.vocabulary.trajectory_vocab_symlog.to(dtype=torch.float32)
-    symlog_scale = model.vocabulary.symlog_scale.to(dtype=torch.float32)
+    device = logits.device
+    residuals = backbone_output.trajectory_output.residuals[0].to(
+        device=device, dtype=torch.float32,
+    )
+    vocab_symlog = model.vocabulary.trajectory_vocab_symlog.to(
+        device=device, dtype=torch.float32,
+    )
+    symlog_scale = model.vocabulary.symlog_scale.to(device=device, dtype=torch.float32)
 
     probs = torch.softmax(logits, dim=-1)
     vocab_count = int(probs.numel())
     selected_top_k = min(max(int(top_k), 1), vocab_count)
     top_probs, top_indices = torch.topk(probs, k=selected_top_k)
 
-    selected_vocab = vocab_symlog[top_indices]
-    selected_residuals = residuals[top_indices]
-    selected_symlog = selected_vocab + selected_residuals * symlog_scale
-    top_trajs_phys = inverse_symlog(selected_symlog).detach().cpu().numpy()
+    top_trajs_phys = _decode_symlog_trajectories(
+        vocab_symlog, symlog_scale, residuals, top_indices,
+    ).detach().cpu().numpy()
 
     winner_idx = int(probs.argmax(dim=-1).item())
     winner_traj_phys = decode_winner_trajectory(backbone_output, model, winner_idx)
