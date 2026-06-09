@@ -28,9 +28,12 @@ import signal
 import sys
 import time
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import numpy as np
+
+# 由 ``_load_carla()`` 在 ``main()`` 内注入；帮助函数运行前必须已加载。
+carla: Any = None
 
 # sys.path 注入：项目根（model 包）+ close_loop/（agents.navigation 包）
 _THIS = Path(__file__).resolve()
@@ -41,6 +44,15 @@ for _p in (str(_PROJECT_ROOT), str(_CLOSE_LOOP_ROOT)):
         sys.path.insert(0, _p)
 
 logger = logging.getLogger("run_closed_loop")
+
+
+def _load_carla() -> Any:
+    """延迟导入 ``carla`` 并写入模块全局，供下方 Carla 帮助函数使用。"""
+    global carla
+    import carla as carla_module
+
+    carla = carla_module
+    return carla
 
 
 # ─────────────────────────────────────────────────────────────
@@ -545,7 +557,7 @@ def main() -> int:
     args = parse_args()
     setup_logging(args.verbose)
 
-    import carla  # noqa: E402
+    _load_carla()
 
     from .agent import MonoDriveAgent  # noqa: E402
     from .planner_goal import DenseRoute  # noqa: E402
