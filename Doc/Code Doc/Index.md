@@ -11,11 +11,16 @@
 | `data/` | `doc/Code Doc/data/` |
 | `config/` | `doc/Code Doc/config/` |
 | `train/` | `doc/Code Doc/train/` |
+| `close_loop/` | `doc/Code Doc/close_loop/` |
 
 ## 文档目录
 
 | 源码文件 | 基本功能 | 摘要文档 | 完整文档 | 状态 |
 | --- | --- | --- | --- | --- |
+| `close_loop/monodrive/agent.py` | Carla 闭环 MonoDriveAgent：8 帧输入、256 词表解码、PID / committed 控制。 | [close_loop/monodrive/agent_abstract.md](close_loop/monodrive/agent_abstract.md) | [close_loop/monodrive/agent.md](close_loop/monodrive/agent.md) | 已同步 |
+| `close_loop/monodrive/inputs.py` | Carla 仿真到 MonoDrive 模型输入（FrameBuffer/EgoBuffer/target_point）。 | [close_loop/monodrive/inputs_abstract.md](close_loop/monodrive/inputs_abstract.md) | [close_loop/monodrive/inputs.md](close_loop/monodrive/inputs.md) | 已同步 |
+| `close_loop/monodrive/model_inference.py` | 轨迹词表 softmax + 残差解码与 top-k 提取。 | [close_loop/monodrive/model_inference_abstract.md](close_loop/monodrive/model_inference_abstract.md) | [close_loop/monodrive/model_inference.md](close_loop/monodrive/model_inference.md) | 已同步 |
+| `close_loop/monodrive/run_closed_loop.py` | Carla 闭环 CLI 入口与主循环。 | [close_loop/monodrive/run_closed_loop_abstract.md](close_loop/monodrive/run_closed_loop_abstract.md) | [close_loop/monodrive/run_closed_loop.md](close_loop/monodrive/run_closed_loop.md) | 已同步 |
 | `data/b2d_dataset.py` | 读取逐场景 B2D H5，并以 PyTorch Dataset 返回 8 帧前视图像、目标候选、Agent future 和局部 Map 标签。 | [data/b2d_dataset_abstract.md](data/b2d_dataset_abstract.md) | [data/b2d_dataset.md](data/b2d_dataset.md) | 已同步 |
 | `data/b2d_preprocess.py` | 将 B2D 原始场景预处理为逐场景 H5，构造 5Hz 输入滑窗、目标候选、Agent future 和局部 Map 标签。 | [data/b2d_preprocess_abstract.md](data/b2d_preprocess_abstract.md) | [data/b2d_preprocess.md](data/b2d_preprocess.md) | 已同步 |
 | `data/detection_class_stats.py` | 跨 H5 数据集统计 Agent、Map、Traffic Light 和 Stop Sign 的检测类别分布。 | [data/detection_class_stats_abstract.md](data/detection_class_stats_abstract.md) | [data/detection_class_stats.md](data/detection_class_stats.md) | 已同步 |

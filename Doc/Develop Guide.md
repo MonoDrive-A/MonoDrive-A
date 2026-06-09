@@ -21,6 +21,7 @@
 | `doc/` | 项目设计文档、开发规范和代码文档。 |
 | `doc/Code Doc/` | 逐文件代码文档目录。 |
 | `model/` | 模型结构、网络模块、loss、推理相关模块。 |
+| `close_loop/` | Carla 闭环仿真、vendored `agents` 导航代码与 MonoDrive 推理 agent。 |
 | `visualization/` | 可视化、调试和分析工具。 |
 
 ### 2.2 文件职责
