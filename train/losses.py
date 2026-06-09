@@ -49,7 +49,7 @@ class MonoDriveTrainingLoss(nn.Module):
 
     Args:
         weights: `config/training.toml` 中读取的 loss 权重。
-        detection_class_weights: 检测分类 none / non-none 策略；`auto` 为分组归一化 Focal Loss。
+        detection_class_weights: 检测分类 none / non-none 策略；`auto` 为分组全类 Focal Loss。
 
     Shape:
         输入模型输出沿用 `MonoDriveBackboneOutput`。
@@ -295,10 +295,12 @@ def _detection_class_cross_entropy(
             class_weight,
             none_index,
         )
-    return _group_normalized_focal_loss(
+    return _group_separated_full_class_focal_loss(
         logits=flat_logits,
         targets=flat_targets,
         none_index=none_index,
+        non_none_weight=non_none_weight,
+        none_weight=none_weight,
     )
 
 
@@ -370,15 +372,18 @@ def _weighted_cross_entropy_breakdown(
     )
 
 
-def _group_normalized_focal_loss(
+def _group_separated_full_class_focal_loss(
     logits: torch.Tensor,
     targets: torch.Tensor,
     none_index: int,
+    non_none_weight: float,
+    none_weight: float,
 ) -> _DetectionClassLossBreakdown:
-    """匹配 / 未匹配分离的分组 Focal Loss。
+    """匹配 / 未匹配分离的全类 Focal Loss。
 
-    匹配 query 只在前景类上竞争（none 不参与 softmax），并额外用 objectness BCE
-    压低 none logit；未匹配 query 仍监督 none。背景组均值按 ``sqrt(N_fg / N_bg)`` 自动缩放。
+    匹配 query 与未匹配 query 均在完整 softmax 上监督硬标签：前者目标为前景类，
+    后者目标为 none。两组分别求 Focal 均值后乘以 ``non_none_weight`` / ``none_weight``，
+    背景组再按 ``sqrt(N_fg / N_bg)`` 自动缩放以缓解 query 数量失衡。
     """
 
     none_mask = targets == none_index
@@ -388,32 +393,31 @@ def _group_normalized_focal_loss(
 
     foreground_loss: torch.Tensor | None = None
     if has_non_none:
-        foreground_logits = logits[non_none_mask, :none_index]
+        foreground_logits = logits[non_none_mask]
         foreground_targets = targets[non_none_mask]
-        none_logits = logits[non_none_mask, none_index]
         foreground_gamma = _auto_focal_gamma(foreground_logits, foreground_targets)
-        class_loss = _focal_cross_entropy_per_sample(
-            foreground_logits,
-            foreground_targets,
-            foreground_gamma,
-        ).mean()
-        objectness_logits = torch.logsumexp(foreground_logits, dim=-1) - none_logits
-        objectness_loss = F.binary_cross_entropy_with_logits(
-            objectness_logits,
-            torch.ones_like(objectness_logits),
+        foreground_loss = (
+            _focal_cross_entropy_per_sample(
+                foreground_logits,
+                foreground_targets,
+                foreground_gamma,
+            ).mean()
+            * float(non_none_weight)
         )
-        foreground_loss = class_loss + objectness_loss
 
     background_loss: torch.Tensor | None = None
     if has_none:
         background_logits = logits[none_mask]
         background_targets = targets[none_mask]
         background_gamma = _auto_focal_gamma(background_logits, background_targets)
-        background_loss = _focal_cross_entropy_per_sample(
-            background_logits,
-            background_targets,
-            background_gamma,
-        ).mean()
+        background_loss = (
+            _focal_cross_entropy_per_sample(
+                background_logits,
+                background_targets,
+                background_gamma,
+            ).mean()
+            * float(none_weight)
+        )
 
     zero_loss = logits.sum() * 0.0
     if foreground_loss is not None and background_loss is not None:

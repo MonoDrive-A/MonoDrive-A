@@ -41,7 +41,7 @@
 
 轨迹词表概率监督使用 `trajectory_logit_soft_ce` 权重，对模型 raw logits 使用 soft cross entropy。标签由 `train/data_processing.py` 在物理空间按 inverse-MSE 构造，并保持为和为 1 的概率分布。
 
-Agent / Map 分类 CE 可通过 `[detection_class_weights]` 控制 none 与 non-none 组的相对权重。默认 `mode = "auto"` 时，`train/losses.py` 使用匹配 / 未匹配分离的分组 Focal Loss：匹配 query 只在前景类上竞争，未匹配 query 监督 none，背景组按 `sqrt(N_fg / N_bg)` 自动缩放；`mode = "manual"` 时使用配置中的手动权重；`mode = "disabled"` 时保持未加类别权重的 CE。
+Agent / Map 分类 CE 可通过 `[detection_class_weights]` 控制 none 与 non-none 组的相对权重。默认 `mode = "auto"` 时，`train/losses.py` 使用匹配 / 未匹配分离的全类 Focal Loss：两组均在完整 softmax 上监督硬标签，并分别乘以 `*_non_none_weight` / `*_none_weight`，背景组再按 `sqrt(N_fg / N_bg)` 自动缩放；`mode = "manual"` 时按类别通道加权 CE；`mode = "disabled"` 时保持未加类别权重的 CE。
 
 ## 6. 配置项
 
@@ -83,6 +83,7 @@ Agent / Map 分类 CE 可通过 `[detection_class_weights]` 控制 none 与 non-
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
+| 2026-06-09 | 1os3_Composer | AI 完成：同步 `auto` 检测分类全类分组 Focal Loss 与组间权重配置说明。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：自动检测分类权重改为按当前 logits CE 梯度预算调整，默认 non-none 预算为 0.25。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：新增检测分类 none / non-none 类别权重配置，默认自动调整。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：轨迹词表概率 loss 从 BCE 改为 soft CE，并同步 loss 权重字段名。 |
