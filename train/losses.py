@@ -13,13 +13,6 @@ from train.data_processing import TrainingBatchLabels
 from train.training_config import DetectionClassWeightConfig, LossWeights
 
 
-_AUTO_FOCAL_GAMMA_MIN = 1.0
-_AUTO_FOCAL_GAMMA_MAX = 4.0
-_AUTO_FOCAL_GAMMA_BASE = 2.0
-_AUTO_BACKGROUND_SCALE_MIN = 0.08
-_AUTO_BACKGROUND_SCALE_MAX = 1.0
-
-
 _MAP_CLASS_AUTO_SCALE_EXPONENT = 0.5
 
 
@@ -49,7 +42,7 @@ class MonoDriveTrainingLoss(nn.Module):
 
     Args:
         weights: `config/training.toml` 中读取的 loss 权重。
-        detection_class_weights: 检测分类 none / non-none 策略；`auto` 为分组全类 Focal Loss。
+        detection_class_weights: 检测分类 none / non-none 策略；`auto` / `manual` 为标准 Focal Loss。
 
     Shape:
         输入模型输出沿用 `MonoDriveBackboneOutput`。
@@ -135,13 +128,15 @@ class MonoDriveTrainingLoss(nn.Module):
     ) -> _DetectionClassLossBreakdown:
         logits = model_output.detection_output.agent_class_logits.to(dtype=torch.float32)
         targets = labels.agent.class_targets.to(device=logits.device, dtype=torch.long)
+        non_none_weight, none_weight = self.detection_class_weights.agent_focal_alpha_weights()
         return _detection_class_cross_entropy(
             logits=logits,
             targets=targets,
             none_index=int(logits.shape[-1]) - 1,
             weight_config=self.detection_class_weights,
-            non_none_weight=self.detection_class_weights.agent_non_none_weight,
-            none_weight=self.detection_class_weights.agent_none_weight,
+            non_none_weight=non_none_weight,
+            none_weight=none_weight,
+            focal_gamma=self.detection_class_weights.focal_gamma,
             name="agent_class_ce",
         )
 
@@ -182,13 +177,15 @@ class MonoDriveTrainingLoss(nn.Module):
     ) -> _DetectionClassLossBreakdown:
         logits = model_output.detection_output.map_class_logits.to(dtype=torch.float32)
         targets = labels.map.class_targets.to(device=logits.device, dtype=torch.long)
+        non_none_weight, none_weight = self.detection_class_weights.map_focal_alpha_weights()
         breakdown = _detection_class_cross_entropy(
             logits=logits,
             targets=targets,
             none_index=int(logits.shape[-1]) - 1,
             weight_config=self.detection_class_weights,
-            non_none_weight=self.detection_class_weights.map_non_none_weight,
-            none_weight=self.detection_class_weights.map_none_weight,
+            non_none_weight=non_none_weight,
+            none_weight=none_weight,
+            focal_gamma=self.detection_class_weights.focal_gamma,
             name="map_class_ce",
         )
         if self.detection_class_weights.mode != "auto":
@@ -249,6 +246,7 @@ def _detection_class_cross_entropy(
     weight_config: DetectionClassWeightConfig,
     non_none_weight: float,
     none_weight: float,
+    focal_gamma: float,
     name: str,
 ) -> _DetectionClassLossBreakdown:
     if logits.ndim < 2:
@@ -281,26 +279,19 @@ def _detection_class_cross_entropy(
 
     if weight_config.mode == "disabled":
         return _mean_cross_entropy_breakdown(flat_logits, flat_targets, none_index)
-    if weight_config.mode == "manual":
-        class_weight = _constant_detection_class_weight(
-            class_count=class_count,
-            none_index=none_index,
-            non_none_weight=non_none_weight,
-            none_weight=none_weight,
-            device=targets.device,
-        )
-        return _weighted_cross_entropy_breakdown(
-            flat_logits,
-            flat_targets,
-            class_weight,
-            none_index,
-        )
-    return _group_separated_full_class_focal_loss(
-        logits=flat_logits,
-        targets=flat_targets,
+    class_alpha = _constant_detection_class_weight(
+        class_count=class_count,
         none_index=none_index,
         non_none_weight=non_none_weight,
         none_weight=none_weight,
+        device=targets.device,
+    )
+    return _standard_focal_loss_breakdown(
+        logits=flat_logits,
+        targets=flat_targets,
+        none_index=none_index,
+        gamma=focal_gamma,
+        class_alpha=class_alpha,
     )
 
 
@@ -346,128 +337,46 @@ def _mean_cross_entropy_breakdown(
     )
 
 
-def _weighted_cross_entropy_breakdown(
+def _standard_focal_loss_breakdown(
     logits: torch.Tensor,
     targets: torch.Tensor,
-    class_weight: torch.Tensor,
     none_index: int,
+    gamma: float,
+    class_alpha: torch.Tensor,
 ) -> _DetectionClassLossBreakdown:
+    """标准 Focal Loss：``-α_t (1 - p_t)^γ log p_t``，对全 batch 求均值。"""
+
     zero_loss = logits.sum() * 0.0
+    per_sample_loss = _standard_focal_loss_per_sample(
+        logits=logits,
+        targets=targets,
+        gamma=gamma,
+        class_alpha=class_alpha,
+    )
     none_mask = targets == none_index
     non_none_mask = ~none_mask
     non_none_loss = (
-        _weighted_cross_entropy(logits[non_none_mask], targets[non_none_mask], class_weight)
+        per_sample_loss[non_none_mask].mean()
         if bool(non_none_mask.any().item())
         else zero_loss
     )
     none_loss = (
-        _weighted_cross_entropy(logits[none_mask], targets[none_mask], class_weight)
+        per_sample_loss[none_mask].mean()
         if bool(none_mask.any().item())
         else zero_loss
     )
     return _DetectionClassLossBreakdown(
-        total=_weighted_cross_entropy(logits, targets, class_weight),
+        total=per_sample_loss.mean(),
         non_none=non_none_loss,
         none=none_loss,
     )
 
 
-def _group_separated_full_class_focal_loss(
-    logits: torch.Tensor,
-    targets: torch.Tensor,
-    none_index: int,
-    non_none_weight: float,
-    none_weight: float,
-) -> _DetectionClassLossBreakdown:
-    """匹配 / 未匹配分离的全类 Focal Loss。
-
-    匹配 query 与未匹配 query 均在完整 softmax 上监督硬标签：前者目标为前景类，
-    后者目标为 none。两组分别求 Focal 均值后乘以 ``non_none_weight`` / ``none_weight``，
-    背景组再按 ``sqrt(N_fg / N_bg)`` 自动缩放以缓解 query 数量失衡。
-    """
-
-    none_mask = targets == none_index
-    non_none_mask = ~none_mask
-    has_none = bool(none_mask.any().item())
-    has_non_none = bool(non_none_mask.any().item())
-
-    foreground_loss: torch.Tensor | None = None
-    if has_non_none:
-        foreground_logits = logits[non_none_mask]
-        foreground_targets = targets[non_none_mask]
-        foreground_gamma = _auto_focal_gamma(foreground_logits, foreground_targets)
-        foreground_loss = (
-            _focal_cross_entropy_per_sample(
-                foreground_logits,
-                foreground_targets,
-                foreground_gamma,
-            ).mean()
-            * float(non_none_weight)
-        )
-
-    background_loss: torch.Tensor | None = None
-    if has_none:
-        background_logits = logits[none_mask]
-        background_targets = targets[none_mask]
-        background_gamma = _auto_focal_gamma(background_logits, background_targets)
-        background_loss = (
-            _focal_cross_entropy_per_sample(
-                background_logits,
-                background_targets,
-                background_gamma,
-            ).mean()
-            * float(none_weight)
-        )
-
-    zero_loss = logits.sum() * 0.0
-    if foreground_loss is not None and background_loss is not None:
-        foreground_count = non_none_mask.sum().to(dtype=torch.float32)
-        background_count = none_mask.sum().to(dtype=torch.float32)
-        background_scale = (foreground_count / background_count).sqrt().clamp(
-            min=_AUTO_BACKGROUND_SCALE_MIN,
-            max=_AUTO_BACKGROUND_SCALE_MAX,
-        )
-        scaled_background_loss = background_scale * background_loss
-        return _DetectionClassLossBreakdown(
-            total=foreground_loss + scaled_background_loss,
-            non_none=foreground_loss,
-            none=scaled_background_loss,
-        )
-    if foreground_loss is not None:
-        return _DetectionClassLossBreakdown(
-            total=foreground_loss,
-            non_none=foreground_loss,
-            none=zero_loss,
-        )
-    if background_loss is not None:
-        return _DetectionClassLossBreakdown(
-            total=background_loss,
-            non_none=zero_loss,
-            none=background_loss,
-        )
-    return _DetectionClassLossBreakdown(total=zero_loss, non_none=zero_loss, none=zero_loss)
-
-
-def _auto_focal_gamma(logits: torch.Tensor, targets: torch.Tensor) -> float:
-    """根据组内目标置信度自适应 focal gamma。"""
-
-    with torch.no_grad():
-        probabilities = torch.softmax(logits.detach(), dim=-1)
-        target_probabilities = probabilities.gather(
-            dim=1,
-            index=targets.unsqueeze(1),
-        ).squeeze(1)
-        if target_probabilities.numel() == 0:
-            return _AUTO_FOCAL_GAMMA_BASE
-        mean_confidence = float(target_probabilities.mean().item())
-        gamma = _AUTO_FOCAL_GAMMA_BASE + (mean_confidence - 0.5)
-        return max(_AUTO_FOCAL_GAMMA_MIN, min(_AUTO_FOCAL_GAMMA_MAX, gamma))
-
-
-def _focal_cross_entropy_per_sample(
+def _standard_focal_loss_per_sample(
     logits: torch.Tensor,
     targets: torch.Tensor,
     gamma: float,
+    class_alpha: torch.Tensor,
 ) -> torch.Tensor:
     log_probabilities = F.log_softmax(logits, dim=-1)
     log_target_probability = log_probabilities.gather(
@@ -475,7 +384,9 @@ def _focal_cross_entropy_per_sample(
         index=targets.unsqueeze(1),
     ).squeeze(1)
     target_probability = log_target_probability.exp()
-    return -((1.0 - target_probability).clamp_min(0.0) ** gamma) * log_target_probability
+    alpha = class_alpha[targets]
+    focal_factor = (1.0 - target_probability).clamp_min(0.0) ** gamma
+    return -alpha * focal_factor * log_target_probability
 
 
 def _mean_cross_entropy(
@@ -483,19 +394,6 @@ def _mean_cross_entropy(
     targets: torch.Tensor,
 ) -> torch.Tensor:
     return F.cross_entropy(logits, targets)
-
-
-def _weighted_cross_entropy(
-    logits: torch.Tensor,
-    targets: torch.Tensor,
-    class_weight: torch.Tensor,
-) -> torch.Tensor:
-    losses = F.cross_entropy(logits, targets, reduction="none")
-    sample_weights = class_weight[targets]
-    denominator = sample_weights.sum()
-    if not bool((denominator > 0.0).item()):
-        return logits.sum() * 0.0
-    return (losses * sample_weights).sum() / denominator.clamp_min(1e-12)
 
 
 def _masked_cross_entropy(

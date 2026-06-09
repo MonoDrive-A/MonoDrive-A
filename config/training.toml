@@ -48,10 +48,12 @@ map_point_mse = 1.0
 
 [detection_class_weights]
 mode = "auto"
-agent_non_none_weight = 1.0
-agent_none_weight = 1.0
-map_non_none_weight = 1.0
-map_none_weight = 1.0
+focal_gamma = 2.0
+focal_alpha = 0.25
+agent_non_none_weight = 0.25
+agent_none_weight = 0.75
+map_non_none_weight = 0.25
+map_none_weight = 0.75
 
 [gradient_monitor]
 enabled = true

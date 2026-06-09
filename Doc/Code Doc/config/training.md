@@ -41,7 +41,7 @@
 
 轨迹词表概率监督使用 `trajectory_logit_soft_ce` 权重，对模型 raw logits 使用 soft cross entropy。标签由 `train/data_processing.py` 在物理空间按 inverse-MSE 构造，并保持为和为 1 的概率分布。
 
-Agent / Map 分类 CE 可通过 `[detection_class_weights]` 控制 none 与 non-none 组的相对权重。默认 `mode = "auto"` 时，`train/losses.py` 使用匹配 / 未匹配分离的全类 Focal Loss：两组均在完整 softmax 上监督硬标签，并分别乘以 `*_non_none_weight` / `*_none_weight`，背景组再按 `sqrt(N_fg / N_bg)` 自动缩放；`mode = "manual"` 时按类别通道加权 CE；`mode = "disabled"` 时保持未加类别权重的 CE。
+Agent / Map 分类 CE 可通过 `[detection_class_weights]` 控制 none 与 non-none 组的相对权重。默认 `mode = "auto"` 时，`train/losses.py` 使用标准 Focal Loss（``γ = focal_gamma``，``α_t`` 由组权重映射）；`mode = "manual"` 使用相同公式但由用户手动指定 ``α_t``；`mode = "disabled"` 时保持未加类别权重的 CE。
 
 ## 6. 配置项
 
@@ -58,11 +58,13 @@ Agent / Map 分类 CE 可通过 `[detection_class_weights]` 控制 none 与 non-
 | `optimization.warmup_steps` | `5000` | 线性 warmup step 数。 |
 | `optimization.cosine_decay_steps` | `5000` | 末尾余弦退火 step 数。 |
 | `loss_weights.*` | `1.0` | 各项 loss 权重。 |
-| `detection_class_weights.mode` | `auto` | 检测分类类别权重模式，支持 `auto`（分组 Focal）、`manual`、`disabled`。 |
-| `detection_class_weights.agent_non_none_weight` | `1.0` | 手动模式下 Agent 非 none 类别组权重。 |
-| `detection_class_weights.agent_none_weight` | `1.0` | 手动模式下 Agent none 类别权重。 |
-| `detection_class_weights.map_non_none_weight` | `1.0` | 手动模式下 Map 非 none 类别组权重。 |
-| `detection_class_weights.map_none_weight` | `1.0` | 手动模式下 Map none 类别权重。 |
+| `detection_class_weights.mode` | `auto` | 检测分类类别权重模式，支持 `auto` / `manual`（标准 Focal Loss）、`disabled`。 |
+| `detection_class_weights.focal_gamma` | `2.0` | 标准 Focal Loss 的 ``γ``。 |
+| `detection_class_weights.focal_alpha` | `0.25` | 标准 Focal Loss 的 ``α``；`auto` 模式下 none 类 ``α_t = 1 - focal_alpha``。 |
+| `detection_class_weights.agent_non_none_weight` | `0.25` | `manual` 模式下 Agent 前景类 ``α_t``。 |
+| `detection_class_weights.agent_none_weight` | `0.75` | `manual` 模式下 Agent none 类 ``α_t``。 |
+| `detection_class_weights.map_non_none_weight` | `0.25` | `manual` 模式下 Map 前景类 ``α_t``。 |
+| `detection_class_weights.map_none_weight` | `0.75` | `manual` 模式下 Map none 类 ``α_t``。 |
 | `gradient_monitor.*` | 见配置文件 | 梯度范数监测阈值和报告数量。 |
 | `checkpoint.output_dir` | `checkpoints/training` | checkpoint 保存目录。 |
 | `logging.output_dir` | `logs/training` | 指标日志目录。 |
@@ -77,12 +79,13 @@ Agent / Map 分类 CE 可通过 `[detection_class_weights]` 控制 none 与 non-
 - 输出目录必须位于项目目录内，且不应提交 checkpoint、日志或训练中间产物。
 - 本文件不重复配置 DINOv3、3D Conv、Transformer、检测头或轨迹词表的结构默认值。
 - 轨迹词表分数使用 soft CE；Agent / Map 分类和 Agent mode 使用 hard-label CE。
-- 检测分类自动类别权重是 batch 级 logits 梯度预算口径，不会读取或写入额外统计文件。
+- 检测分类 `auto` / `manual` 模式使用标准 Focal Loss，不会读取或写入额外统计文件。
 
 ## 9. 维护记录
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
+| 2026-06-09 | 1os3_Composer | AI 完成：检测分类改为标准 Focal Loss，新增 `focal_gamma` 配置。 |
 | 2026-06-09 | 1os3_Composer | AI 完成：同步 `auto` 检测分类全类分组 Focal Loss 与组间权重配置说明。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：自动检测分类权重改为按当前 logits CE 梯度预算调整，默认 non-none 预算为 0.25。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：新增检测分类 none / non-none 类别权重配置，默认自动调整。 |
