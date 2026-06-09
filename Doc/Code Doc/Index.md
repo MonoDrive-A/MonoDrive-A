@@ -17,6 +17,7 @@
 
 | 源码文件 | 基本功能 | 摘要文档 | 完整文档 | 状态 |
 | --- | --- | --- | --- | --- |
+| `close_loop/monodrive/camera_config.py` | B2D CAM_FRONT 相机 FOV、内外参常量与针孔内参 helper。 | [close_loop/monodrive/camera_config_abstract.md](close_loop/monodrive/camera_config_abstract.md) | [close_loop/monodrive/camera_config.md](close_loop/monodrive/camera_config.md) | 已同步 |
 | `close_loop/monodrive/agent.py` | Carla 闭环 MonoDriveAgent：8 帧输入、256 词表解码、PID / committed 控制。 | [close_loop/monodrive/agent_abstract.md](close_loop/monodrive/agent_abstract.md) | [close_loop/monodrive/agent.md](close_loop/monodrive/agent.md) | 已同步 |
 | `close_loop/monodrive/inputs.py` | Carla 仿真到 MonoDrive 模型输入（FrameBuffer/EgoBuffer/target_point）。 | [close_loop/monodrive/inputs_abstract.md](close_loop/monodrive/inputs_abstract.md) | [close_loop/monodrive/inputs.md](close_loop/monodrive/inputs.md) | 已同步 |
 | `close_loop/monodrive/model_inference.py` | 轨迹词表 softmax + 残差解码与 top-k 提取。 | [close_loop/monodrive/model_inference_abstract.md](close_loop/monodrive/model_inference_abstract.md) | [close_loop/monodrive/model_inference.md](close_loop/monodrive/model_inference.md) | 已同步 |

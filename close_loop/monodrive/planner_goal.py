@@ -4,13 +4,14 @@
 ``sampling_resolution`` 取 0.5m 让路径上的航点足够密。
 
 **Goal 选点（默认）** — ``goal_at_training_aligned``，与
-``data/b2d_preprocess.py`` 的目标点候选规则一致：
+``data/b2d_preprocess.py`` 的 ``_build_target_candidates`` 一致：
 
-- 候选：当前路径索引 **之后** 的所有航点（≈ clip 里 ref 之后的未来位姿）；
-- 选取：相对 ``p_ref`` 直线欧氏距离 ``>= GOAL_MIN_DIST_M`` 的**最近**点；
-- 若均 < 阈值：取**最远**点；无候选则路径终点。
+- 候选：当前路径索引 **之后** 的所有航点；
+- 选取：相对 ``p_ref`` 直线欧氏距离落在 ``[GOAL_MIN_DIST_M, GOAL_MAX_DIST_M]``（默认 24–30 m）
+  的**第一个**前方航点；
+- 若均不在该区间：取**最远**点；无候选则路径终点。
 
-旧接口 ``goal_at_arc_distance``（沿路径弧长 +16m）仍保留，供对比 / 调试。
+旧接口 ``goal_at_arc_distance``（沿路径弧长）仍保留，供对比 / 调试。
 
 ``DenseRoute``::
 
@@ -24,8 +25,9 @@
 
 from __future__ import annotations
 
-# 与 B2D 预处理目标点最小距离阈值保持一致
-GOAL_MIN_DIST_M = 16.0
+# 与 data/b2d_preprocess.py target_min/max_distance 保持一致
+GOAL_MIN_DIST_M = 24.0
+GOAL_MAX_DIST_M = 30.0
 
 import math
 from dataclasses import dataclass, field
@@ -120,20 +122,26 @@ class DenseRoute:
         idx_now: int,
         p_ref_world: np.ndarray,
         min_dist_m: float = GOAL_MIN_DIST_M,
+        max_dist_m: float = GOAL_MAX_DIST_M,
     ) -> Tuple[carla.Waypoint, int, np.ndarray]:
-        """与训练集 ``_select_goal_world_xy`` 相同的 goal 规则（直线距离，非弧长）。
+        """与训练集 ``_build_target_candidates`` 相同的 goal 规则（直线距离，非弧长）。
 
         Args:
             idx_now: 路径上离 ego 最近的航点索引（``nearest_index`` 输出）。
-            p_ref_world: 参考点世界系 xy，应与 ``build_goal_dxy`` 的 ref 帧一致
+            p_ref_world: 参考点世界系 xy，应与 ``build_target_point`` 的 ref 帧一致
                          （EgoBuffer 最新帧位置）。
-            min_dist_m: 最小直线距离阈值，默认 16 m。
+            min_dist_m: 目标点最小直线距离 (m)，默认 24。
+            max_dist_m: 目标点最大直线距离 (m)，默认 30。
 
         Returns:
             ``(goal_waypoint, goal_index, goal_xy)``，``goal_xy`` shape ``(2,)``。
         """
         if len(self) == 0:
             raise RuntimeError("DenseRoute 还未 compute()")
+        if float(min_dist_m) > float(max_dist_m):
+            raise ValueError(
+                f"min_dist_m 必须 <= max_dist_m，实际为 {min_dist_m} > {max_dist_m}"
+            )
         idx_now = max(0, min(int(idx_now), len(self) - 1))
         p_ref = np.asarray(p_ref_world, dtype=np.float64).reshape(2)
 
@@ -144,12 +152,10 @@ class DenseRoute:
             return self.waypoints[idx], idx, self.xy[idx].copy()
 
         cand_xy = self.xy[idx_start:]
-        dx = cand_xy[:, 0] - p_ref[0]
-        dy = cand_xy[:, 1] - p_ref[1]
-        dist = np.hypot(dx, dy)
-        far_enough = dist >= float(min_dist_m)
-        if np.any(far_enough):
-            local_idx = int(np.argmin(np.where(far_enough, dist, np.inf)))
+        dist = np.hypot(cand_xy[:, 0] - p_ref[0], cand_xy[:, 1] - p_ref[1])
+        in_band = (dist >= float(min_dist_m)) & (dist <= float(max_dist_m))
+        if np.any(in_band):
+            local_idx = int(np.argmax(in_band))
         else:
             local_idx = int(np.argmax(dist))
         idx = int(idx_start + local_idx)

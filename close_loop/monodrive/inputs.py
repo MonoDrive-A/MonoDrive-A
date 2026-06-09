@@ -27,8 +27,8 @@ import torch.nn.functional as F
 # ─────────────────────────────────────────────────────────────
 # 图像 / ego buffer 常量（与训练对齐）
 # ─────────────────────────────────────────────────────────────
-SOURCE_HW = (900, 1600)  # B2D 训练采集分辨率 (H, W)，仅作参考
-DEFAULT_CAMERA_HW = (450, 800)  # 闭环默认 Carla 相机 (H, W)，低于训练分辨率以减轻渲染负担
+SOURCE_HW = (900, 1600)  # B2D CAM_FRONT 采集分辨率 (H, W)，见 camera_config.py
+DEFAULT_CAMERA_HW = (450, 800)  # 闭环默认 Carla 相机 (H, W)，FOV 仍为 70°
 MODEL_HW = (288, 512)    # 模型输入分辨率 (H, W)，与 config/vision_embedding.toml 一致
 FINAL_HW = MODEL_HW
 PAST_FRAMES = 8

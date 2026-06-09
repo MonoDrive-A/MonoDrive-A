@@ -41,7 +41,7 @@
 | `PAST_FRAMES` | 8 | 与 `config/vision_embedding.toml` 一致。 |
 | `TRAJECTORY_DT` | 0.5 | 与 B2D 2Hz 未来轨迹标签一致。 |
 | `FINAL_HW` | (288, 512) | 与 `config/vision_embedding.toml` 一致。 |
-| `SOURCE_HW` | (900, 1600) | Carla 摄像头原始分辨率 (H, W)。 |
+| `SOURCE_HW` | (900, 1600) | B2D CAM_FRONT 采集分辨率 (H, W)。 |
 
 ## 5. 依赖关系
 

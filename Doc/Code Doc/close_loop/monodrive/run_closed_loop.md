@@ -27,7 +27,9 @@ Carla Town10HD（或可配置地图）闭环评测脚本：world 同步设置、
 | `fixed_dt` | 0.125 s (8 FPS) |
 | `n-ticks` | 960 |
 | `replan-every` | 4 |
-| `goal-min-dist-m` | 16.0 |
+| `goal-min-dist-m` | 24.0 |
+| `goal-max-dist-m` | 30.0 |
+| `camera-fov` | 70.0 |
 | `viz-top-k` | 8 |
 
 ## 5. 依赖关系

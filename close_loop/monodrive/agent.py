@@ -51,7 +51,7 @@ from .inputs import (  # noqa: E402
     ego_local_to_world,
 )
 from .model_inference import decode_trajectories, decode_winner_trajectory  # noqa: E402
-from .planner_goal import DenseRoute, GOAL_MIN_DIST_M  # noqa: E402
+from .planner_goal import DenseRoute, GOAL_MAX_DIST_M, GOAL_MIN_DIST_M  # noqa: E402
 
 logger = logging.getLogger("monodrive_agent")
 
@@ -294,6 +294,7 @@ class MonoDriveAgent:
         reverse_dx_threshold: float = 0.5,
         force_winner_idx: Optional[int] = None,
         goal_min_dist_m: float = GOAL_MIN_DIST_M,
+        goal_max_dist_m: float = GOAL_MAX_DIST_M,
         goal_hold_ticks: int = 1,
         winner_hysteresis: float = 0.15,
         diagnostic_dir: Optional[str] = None,
@@ -345,12 +346,11 @@ class MonoDriveAgent:
                                   小于 ``-该值`` 才挂倒挡（默认 0.5 m，过滤抖动）。
             force_winner_idx: 若不为 ``None``，强制把第 N 条词表轨迹作为 winner，
                               范围 ``[0, 255]``。
-            goal_min_dist_m: 与训练 ``GOAL_MIN_DIST_M`` 对齐的 goal 直线距离阈值 (m)。
+            goal_min_dist_m: 目标点最小直线距离 (m)，默认 24，与 B2D 训练一致。
+            goal_max_dist_m: 目标点最大直线距离 (m)，默认 30。
             goal_hold_ticks: goal 在世界系中保持不变的 tick 数（默认 1 = 每 tick 重选）。
-                             训练里 anchor 帧的 ``||goal_local|| >= 16m`` 是恒等约束，
-                             若 hold 则 ego 逐渐逼近 goal、anchor 的 goal_d 会跌破 16m，
-                             落入 OOD 区域（实测 prob 会平摊并向 mode 0 倾斜）。
-                             仅在确实需要时（如调试）把它设大。
+                             训练 anchor 的 ``||target_point||`` 应在 24–30 m；
+                             hold > 1 时 ego 逼近目标后可能落入 OOD。
             winner_hysteresis: re-plan 时新 argmax 相对上一 winner 的 prob 领先不足该值则
                                保持上一 winner，减轻 mode 0 等 flicker（0 = 关闭）。
             diagnostic_dir: 若指定，则每次 re-plan 把输入与 top-k 轨迹 dump 成 PNG + NPZ。
@@ -423,6 +423,12 @@ class MonoDriveAgent:
             int(force_winner_idx) if force_winner_idx is not None else None
         )
         self.goal_min_dist_m = float(goal_min_dist_m)
+        self.goal_max_dist_m = float(goal_max_dist_m)
+        if self.goal_min_dist_m > self.goal_max_dist_m:
+            raise ValueError(
+                f"goal_min_dist_m 必须 <= goal_max_dist_m，"
+                f"实际为 {self.goal_min_dist_m} > {self.goal_max_dist_m}"
+            )
         self.goal_hold_ticks = max(1, int(goal_hold_ticks))
         self.winner_hysteresis = max(0.0, float(winner_hysteresis))
         self.diagnostic_dir = Path(diagnostic_dir).expanduser().resolve() if diagnostic_dir else None
@@ -662,6 +668,7 @@ class MonoDriveAgent:
                 self._last_route_idx,
                 p_ref_world=p_ref,
                 min_dist_m=self.goal_min_dist_m,
+                max_dist_m=self.goal_max_dist_m,
             )
             self._held_goal_xy = np.asarray(goal_xy, dtype=np.float64)
             self._last_goal_idx = int(goal_idx)
@@ -713,8 +720,9 @@ class MonoDriveAgent:
         if logger.isEnabledFor(logging.DEBUG):
             gdist = float(np.linalg.norm(goal_world_xy - p_ref))
             logger.debug(
-                "goal@training_aligned: route_idx=%d goal_idx=%d ||d||=%.2f m (thr=%.1f) refreshed=%s",
-                self._last_route_idx, goal_idx, gdist, self.goal_min_dist_m, goal_refreshed,
+                "goal@training_aligned: route_idx=%d goal_idx=%d ||d||=%.2f m (band=[%.1f, %.1f]) refreshed=%s",
+                self._last_route_idx, goal_idx, gdist,
+                self.goal_min_dist_m, self.goal_max_dist_m, goal_refreshed,
             )
 
         ego_motion = build_ego_motion(self.ego_buf)

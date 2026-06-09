@@ -41,7 +41,8 @@
 | `backbone_config_path` | `config/backbone.toml` | 主干配置 |
 | `viz_top_k` | 8 | 可视化候选数 |
 | `replan_every` | 4 | committed 重规划间隔 |
-| `goal_min_dist_m` | 16.0 | 目标点选点阈值 |
+| `goal_min_dist_m` | 24.0 | 目标点最小直线距离 (m) |
+| `goal_max_dist_m` | 30.0 | 目标点最大直线距离 (m) |
 | `winner_hysteresis` | 0.15 | winner 切换迟滞 |
 
 ## 5. 依赖关系

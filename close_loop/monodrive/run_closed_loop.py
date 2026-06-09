@@ -32,6 +32,13 @@ from typing import Any, List, Optional, Tuple
 
 import numpy as np
 
+from .camera_config import (
+    B2D_CAMERA_FOV_DEG,
+    B2D_CAMERA_HW,
+    B2D_CAM2EGO_XYZ,
+    pinhole_intrinsics,
+)
+
 # 由 ``_load_carla()`` 在 ``main()`` 内注入；帮助函数运行前必须已加载。
 carla: Any = None
 
@@ -144,18 +151,20 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     p.add_argument(
-        "--goal-min-dist-m", type=float, default=16.0,
+        "--goal-min-dist-m", type=float, default=24.0,
         help=(
-            "模型 target_point 选点：相对 EgoBuffer 最新帧的直线欧氏距离阈值 (m)，"
-            "规则与 data/b2d_preprocess.py 一致（默认 16）"
+            "目标点最小直线距离 (m)，与 data/b2d_preprocess.py 一致（默认 24）"
         ),
+    )
+    p.add_argument(
+        "--goal-max-dist-m", type=float, default=30.0,
+        help="目标点最大直线距离 (m)，默认 30",
     )
     p.add_argument(
         "--goal-hold-ticks", type=int, default=1,
         help=(
             "goal 在世界系中保持不变的 tick 数（默认 1 = 每 tick 重选）。"
-            "训练数据里 anchor 帧 ||goal_local|| 恒 >= 16m，hold > 1 时 ego 逐步逼近 goal、"
-            "anchor goal_d 跌破 16m 落入 OOD（prob 平摊、mode 0 抬头）。仅调试时设大。"
+            "训练 anchor 的 ||target_point|| 应在 24–30 m；hold > 1 时可能落入 OOD。"
         ),
     )
     p.add_argument(
@@ -193,7 +202,11 @@ def parse_args() -> argparse.Namespace:
                    help="前视 RGB 相机高度（像素）")
     p.add_argument(
         "--camera-full-res", action="store_true",
-        help="使用 B2D 训练采集分辨率 1600×900（默认 800×450）",
+        help="使用 B2D 训练采集分辨率 1600×900（默认 800×450；FOV 仍为 70°）",
+    )
+    p.add_argument(
+        "--camera-fov", type=float, default=B2D_CAMERA_FOV_DEG,
+        help="前视 RGB 水平 FOV (°)，与 B2D CAM_FRONT 一致，默认 70",
     )
 
     # ── 纵向控制方案 ──
@@ -544,17 +557,17 @@ def attach_front_camera(
     parent: carla.Vehicle,
     width: int = 800,
     height: int = 450,
-    fov: float = 120.0,
+    fov: float = B2D_CAMERA_FOV_DEG,
 ) -> carla.Sensor:
-    """挂前视 RGB 摄像头。默认 800×450；模型侧仍会 resize 到 288×512。"""
+    """挂前视 RGB 摄像头；内外参与 B2D ``CAM_FRONT`` 对齐（FOV 70°，cam2ego 0.8/0/1.6 m）。"""
     bp_lib = world.get_blueprint_library()
     bp = bp_lib.find("sensor.camera.rgb")
     bp.set_attribute("image_size_x", str(width))
     bp.set_attribute("image_size_y", str(height))
     bp.set_attribute("fov", str(fov))
     bp.set_attribute("sensor_tick", "0.0")     # 同步模式下随 world.tick() 触发
-    # 数据集里相机位姿大致在车头前方约 1.5m、离地 1.6m
-    tf = carla.Transform(carla.Location(x=1.5, y=0.0, z=1.6))
+    x_m, y_m, z_m = B2D_CAM2EGO_XYZ
+    tf = carla.Transform(carla.Location(x=x_m, y=y_m, z=z_m))
     sensor = world.spawn_actor(bp, tf, attach_to=parent)
     return sensor
 
@@ -579,14 +592,23 @@ def main() -> int:
     )
 
     if args.camera_full_res:
-        camera_width, camera_height = 1600, 900
+        camera_width, camera_height = B2D_CAMERA_HW[1], B2D_CAMERA_HW[0]
     else:
         camera_width = int(args.camera_width)
         camera_height = int(args.camera_height)
+    camera_fov = float(args.camera_fov)
     if camera_width <= 0 or camera_height <= 0:
         logger.error("camera 分辨率必须为正数，实际 %dx%d", camera_width, camera_height)
         return 1
-    logger.info("相机 / MP4 分辨率: %dx%d", camera_width, camera_height)
+    if camera_fov <= 0.0 or camera_fov >= 180.0:
+        logger.error("camera FOV 必须在 (0, 180) 内，实际 %.2f", camera_fov)
+        return 1
+    fx, fy, cx, cy = pinhole_intrinsics(camera_width, camera_height, camera_fov)
+    x_m, y_m, z_m = B2D_CAM2EGO_XYZ
+    logger.info(
+        "相机 / MP4: %dx%d FOV=%.1f° | cam2ego=(%.1f, %.1f, %.1f) m | fx=%.1f cx=%.1f",
+        camera_width, camera_height, camera_fov, x_m, y_m, z_m, fx, cx,
+    )
 
     if args.seed is None:
         seed = int(time.time() * 1000) % (2**31)
@@ -688,7 +710,7 @@ def main() -> int:
         # ── 摄像头 ──
         camera = attach_front_camera(
             world, ego_vehicle,
-            width=camera_width, height=camera_height, fov=120.0,
+            width=camera_width, height=camera_height, fov=camera_fov,
         )
         camera.listen(lambda image: image_q.put(image))
         # 摄像头第一帧会在第一个 tick 之后入队
@@ -736,14 +758,16 @@ def main() -> int:
             reverse_dx_threshold=args.reverse_dx_threshold,
             force_winner_idx=args.force_winner_idx,
             goal_min_dist_m=args.goal_min_dist_m,
+            goal_max_dist_m=args.goal_max_dist_m,
             goal_hold_ticks=args.goal_hold_ticks,
             winner_hysteresis=args.winner_hysteresis,
             diagnostic_dir=args.diagnostic_dir,
             diagnostic_every=args.diagnostic_every,
         )
         logger.info(
-            "Goal 选点: training_aligned（直线距离 >= %.1f m，路径前方最近点）| hold=%d tick (%.1fs)",
+            "Goal 选点: training_aligned（直线距离 [%.1f, %.1f] m，路径前方首点）| hold=%d tick (%.1fs)",
             args.goal_min_dist_m,
+            args.goal_max_dist_m,
             args.goal_hold_ticks,
             args.goal_hold_ticks * 0.125,
         )
@@ -783,7 +807,9 @@ def main() -> int:
             )
 
         # 2D overlay 投影器（无论是否录 MP4 都先备好；overlay 只在 --mp4 且未禁用时启用）
-        projector = CameraProjector(width=camera_width, height=camera_height, fov_deg=120.0)
+        projector = CameraProjector(
+            width=camera_width, height=camera_height, fov_deg=camera_fov,
+        )
         do_mp4_overlay = bool(args.mp4) and not args.no_viz and not args.no_mp4_overlay
 
         if args.mp4:
@@ -859,7 +885,9 @@ def main() -> int:
             latest_ego = agent.ego_buf.latest()
             p_ref_viz = np.array([latest_ego.x, latest_ego.y], dtype=np.float64)
             goal_wp, _, goal_xy_viz = route.goal_at_training_aligned(
-                idx, p_ref_viz, min_dist_m=agent.goal_min_dist_m,
+                idx, p_ref_viz,
+                min_dist_m=agent.goal_min_dist_m,
+                max_dist_m=agent.goal_max_dist_m,
             )
             goal_xyz = (
                 float(goal_xy_viz[0]),
