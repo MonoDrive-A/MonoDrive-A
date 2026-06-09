@@ -43,7 +43,7 @@
 
 训练入口先读取 `config/training.toml`，再读取主干和训练数据配置。Dataset 构建完成后，会打印样本数、batch size、`drop_last` 和预期每个 epoch 的 step 数。模型构建后会显式检查 DINOv3 是否冻结；优化器只接收 `requires_grad=True` 参数，因此冻结 DINOv3 不参与反向更新。
 
-每步训练流程为：设置学习率、搬运 batch 到设备、模型前向、构造训练标签、计算 FP32 loss、反向、梯度监测、可选梯度裁剪、优化器更新、日志记录和按间隔保存 checkpoint。Loss 模块由 `loss_weights` 和 `detection_class_weights` 共同构造，其中后者控制 Agent / Map 分类 CE 的 none / non-none 类别权重策略。
+每步训练流程为：设置学习率、搬运 batch 到设备、模型前向、构造训练标签、计算 FP32 loss、反向、梯度监测、可选梯度裁剪、优化器更新、日志记录和按间隔保存 checkpoint。Loss 模块由 `loss_weights` 和 `detection_class_weights` 共同构造，其中后者控制 Agent / Map 分类 CE 的 none / non-none 类别权重策略。控制台与 JSONL metrics 会记录 Agent / Map 检测分类 CE 的 none / non-none 分项（`agent_ce_fg` / `agent_ce_bg`、`map_ce_fg` / `map_ce_bg`）。
 
 断点恢复会加载模型、优化器、调度器、global step、epoch、batch index 和 RNG 状态。DataLoader 以 epoch seed 重建同一份样本顺序，并在构建首个恢复 epoch 的 sampler 时按 `batch_index * batch_size` 切掉已完成样本，避免重新读取和 collate 恢复点之前的 batch。
 
@@ -74,6 +74,7 @@
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
+| 2026-06-09 | 1os3_Composer | AI 完成：控制台训练日志新增 Agent / Map 检测分类 CE none / non-none 分项。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：同步检测分类自动权重改为 logits 梯度预算口径。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：训练入口向 loss 模块传入检测分类 none / non-none 类别权重配置。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：断点恢复时按 batch index 切分 sampler，避免读取并丢弃已完成 batch。 |

@@ -503,6 +503,22 @@ def _maybe_print_metrics(
             f" traj_ce={metrics['loss/trajectory_logit_soft_ce']:.6f}"
             f" traj_res={metrics['loss/trajectory_residual_mse']:.6f}"
         )
+    if (
+        "loss/agent_class_ce_non_none" in metrics
+        and "loss/agent_class_ce_none" in metrics
+    ):
+        message += (
+            f" agent_ce_fg={metrics['loss/agent_class_ce_non_none']:.6f}"
+            f" agent_ce_bg={metrics['loss/agent_class_ce_none']:.6f}"
+        )
+    if (
+        "loss/map_class_ce_non_none" in metrics
+        and "loss/map_class_ce_none" in metrics
+    ):
+        message += (
+            f" map_ce_fg={metrics['loss/map_class_ce_non_none']:.6f}"
+            f" map_ce_bg={metrics['loss/map_class_ce_none']:.6f}"
+        )
     if gradient_result is not None and gradient_result.has_alert:
         message += (
             " grad_alert="

@@ -50,6 +50,8 @@ TRAJECTORY_COLORS = [
 DEFAULT_TRAJECTORY_TOP_K = 5
 DEFAULT_AGENT_TOP_K = 16
 DEFAULT_MAP_TOP_K = 32
+DEFAULT_AGENT_CONFIDENCE_THRESHOLD = 0.0
+DEFAULT_MAP_CONFIDENCE_THRESHOLD = 0.0
 
 
 @dataclass(frozen=True)
@@ -59,6 +61,7 @@ class ModelOutputVisualizationData:
     Shape:
         `top_trajectory_points`: `[K, 6, 2]`，ego 坐标系米制轨迹。
         `agent_boxes`: `[A, 6]`，`[x, y, l, w, h, yaw]`。
+        `agent_none_scores`: `[A]`，完整类别 softmax 上的 `none` 概率。
         `agent_future_points`: `[A, 6, 2]`，ego 坐标系米制 Agent future。
         `map_points`: `[M, 100, 2]`，ego 坐标系米制 Map 点。
     """
@@ -75,6 +78,7 @@ class ModelOutputVisualizationData:
     agent_scores: np.ndarray
     agent_class_ids: np.ndarray
     agent_class_labels: np.ndarray
+    agent_none_scores: np.ndarray
     agent_boxes: np.ndarray
     agent_mode_ids: np.ndarray
     agent_future_points: np.ndarray
@@ -83,6 +87,8 @@ class ModelOutputVisualizationData:
     map_class_labels: np.ndarray
     map_points: np.ndarray
     model_weight_source: str
+    agent_confidence_threshold: float
+    map_confidence_threshold: float
 
 
 @dataclass(frozen=True)
@@ -131,12 +137,16 @@ def run_backbone_feature_pca_sample(
     trajectory_top_k: int = DEFAULT_TRAJECTORY_TOP_K,
     agent_top_k: int = DEFAULT_AGENT_TOP_K,
     map_top_k: int = DEFAULT_MAP_TOP_K,
+    agent_confidence_threshold: float = DEFAULT_AGENT_CONFIDENCE_THRESHOLD,
+    map_confidence_threshold: float = DEFAULT_MAP_CONFIDENCE_THRESHOLD,
 ) -> BackboneFeaturePCAVisualizationData:
     """调用真实统一主干，收集每层视觉 Token PCA 数据。"""
 
     _validate_positive_int(trajectory_top_k, "trajectory_top_k")
     _validate_positive_int(agent_top_k, "agent_top_k")
     _validate_positive_int(map_top_k, "map_top_k")
+    _validate_confidence_threshold(agent_confidence_threshold, "agent_confidence_threshold")
+    _validate_confidence_threshold(map_confidence_threshold, "map_confidence_threshold")
 
     resolved_project_root = Path(project_root).resolve()
     resolved_h5_path = _resolve_project_path(h5_path, resolved_project_root, "h5_path")
@@ -214,6 +224,8 @@ def run_backbone_feature_pca_sample(
         trajectory_top_k=trajectory_top_k,
         agent_top_k=agent_top_k,
         map_top_k=map_top_k,
+        agent_confidence_threshold=agent_confidence_threshold,
+        map_confidence_threshold=map_confidence_threshold,
     )
     return BackboneFeaturePCAVisualizationData(
         scene_name=str(sample["scene_name"]),
@@ -255,6 +267,8 @@ def render_backbone_feature_pca_sample(
     trajectory_top_k: int = DEFAULT_TRAJECTORY_TOP_K,
     agent_top_k: int = DEFAULT_AGENT_TOP_K,
     map_top_k: int = DEFAULT_MAP_TOP_K,
+    agent_confidence_threshold: float = DEFAULT_AGENT_CONFIDENCE_THRESHOLD,
+    map_confidence_threshold: float = DEFAULT_MAP_CONFIDENCE_THRESHOLD,
 ) -> Path:
     """运行真实统一主干并导出每层 PCA 诊断 PNG。"""
 
@@ -270,6 +284,8 @@ def render_backbone_feature_pca_sample(
         trajectory_top_k=trajectory_top_k,
         agent_top_k=agent_top_k,
         map_top_k=map_top_k,
+        agent_confidence_threshold=agent_confidence_threshold,
+        map_confidence_threshold=map_confidence_threshold,
     )
     rendered_image = render_visualization(visualization_data)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -390,7 +406,11 @@ def _draw_model_outputs_panel(
     lines = [
         _format_top_trajectory_line(outputs),
         f"agents shown = {len(outputs.agent_scores)}, maps shown = {len(outputs.map_scores)}",
-        "detection queries whose argmax class is none are hidden",
+        (
+            "detection filters: argmax != none, "
+            f"agent p>={outputs.agent_confidence_threshold:.3f}, "
+            f"map p>={outputs.map_confidence_threshold:.3f}"
+        ),
         "trajectory = vocab_symlog + residual * symlog_scale, then inverse Symlog",
         "agent/map coordinates are inverse Symlog or expm1 decoded for visualization only",
         f"model weights = {outputs.model_weight_source}",
@@ -475,7 +495,10 @@ def _draw_output_agents(
         label_point = transform.to_pixel(float(center_xy[0]), float(center_xy[1]))
         draw.text(
             (label_point[0] + 4, label_point[1] - 8),
-            f"{str(outputs.agent_class_labels[agent_index])}:{float(outputs.agent_scores[agent_index]):.2f}",
+            (
+                f"{str(outputs.agent_class_labels[agent_index])}:{float(outputs.agent_scores[agent_index]):.2f} "
+                f"none:{float(outputs.agent_none_scores[agent_index]):.2f}"
+            ),
             fill=color,
         )
 
@@ -788,6 +811,8 @@ def _summarize_model_outputs(
     trajectory_top_k: int = DEFAULT_TRAJECTORY_TOP_K,
     agent_top_k: int = DEFAULT_AGENT_TOP_K,
     map_top_k: int = DEFAULT_MAP_TOP_K,
+    agent_confidence_threshold: float = DEFAULT_AGENT_CONFIDENCE_THRESHOLD,
+    map_confidence_threshold: float = DEFAULT_MAP_CONFIDENCE_THRESHOLD,
 ) -> ModelOutputVisualizationData:
     """把模型空间输出转换为 BEV 诊断图使用的米制数据。"""
 
@@ -804,12 +829,26 @@ def _summarize_model_outputs(
         model,
         trajectory_top_k,
     )
-    agent_scores, agent_class_ids, agent_class_labels, agent_boxes, agent_mode_ids, agent_future_points = _summarize_agent_outputs(
+    (
+        agent_scores,
+        agent_class_ids,
+        agent_class_labels,
+        agent_none_scores,
+        agent_boxes,
+        agent_mode_ids,
+        agent_future_points,
+    ) = _summarize_agent_outputs(
         backbone_output,
         model,
         agent_top_k,
+        agent_confidence_threshold,
     )
-    map_scores, map_class_ids, map_class_labels, map_points = _summarize_map_outputs(backbone_output, model, map_top_k)
+    map_scores, map_class_ids, map_class_labels, map_points = _summarize_map_outputs(
+        backbone_output,
+        model,
+        map_top_k,
+        map_confidence_threshold,
+    )
     return ModelOutputVisualizationData(
         target_point=_tensor_to_numpy(sample["target_point"]).astype(np.float32, copy=False),
         future_trajectory=_tensor_to_numpy(sample["future_trajectory"]).astype(np.float32, copy=False),
@@ -823,6 +862,7 @@ def _summarize_model_outputs(
         agent_scores=agent_scores,
         agent_class_ids=agent_class_ids,
         agent_class_labels=agent_class_labels,
+        agent_none_scores=agent_none_scores,
         agent_boxes=agent_boxes,
         agent_mode_ids=agent_mode_ids,
         agent_future_points=agent_future_points,
@@ -831,6 +871,8 @@ def _summarize_model_outputs(
         map_class_labels=map_class_labels,
         map_points=map_points,
         model_weight_source=model_weight_source,
+        agent_confidence_threshold=float(agent_confidence_threshold),
+        map_confidence_threshold=float(map_confidence_threshold),
     )
 
 
@@ -867,7 +909,8 @@ def _summarize_agent_outputs(
     backbone_output: MonoDriveBackboneOutput,
     model: MonoDriveBackbone,
     top_k: int,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    confidence_threshold: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     detection_output = backbone_output.detection_output
     class_logits = detection_output.agent_class_logits[0].detach().to(dtype=torch.float32).cpu()
     states = detection_output.agent_states[0].detach().to(dtype=torch.float32).cpu()
@@ -877,20 +920,35 @@ def _summarize_agent_outputs(
     class_probabilities = torch.softmax(class_logits, dim=-1)
     query_scores, class_ids = class_probabilities.max(dim=-1)
     none_class_id = len(model.detection_config.agent_class_names)
+    none_scores = class_probabilities[:, none_class_id]
     non_none_indices = torch.nonzero(class_ids != none_class_id, as_tuple=False).flatten()
     if int(non_none_indices.numel()) == 0:
         return (
             np.empty((0,), dtype=np.float32),
             np.empty((0,), dtype=np.int32),
             np.empty((0,), dtype=object),
+            np.empty((0,), dtype=np.float32),
             np.empty((0, 6), dtype=np.float32),
             np.empty((0,), dtype=np.int32),
             np.empty((0, model.detection_config.agent_future_points, 2), dtype=np.float32),
         )
     candidate_scores = query_scores[non_none_indices]
-    selected_count = min(top_k, int(candidate_scores.numel()))
-    selected_scores, candidate_order = torch.topk(candidate_scores, k=selected_count)
-    selected_indices = non_none_indices[candidate_order]
+    confidence_mask = candidate_scores >= confidence_threshold
+    filtered_indices = non_none_indices[confidence_mask]
+    filtered_scores = candidate_scores[confidence_mask]
+    if int(filtered_scores.numel()) == 0:
+        return (
+            np.empty((0,), dtype=np.float32),
+            np.empty((0,), dtype=np.int32),
+            np.empty((0,), dtype=object),
+            np.empty((0,), dtype=np.float32),
+            np.empty((0, 6), dtype=np.float32),
+            np.empty((0,), dtype=np.int32),
+            np.empty((0, model.detection_config.agent_future_points, 2), dtype=np.float32),
+        )
+    selected_count = min(top_k, int(filtered_scores.numel()))
+    selected_scores, candidate_order = torch.topk(filtered_scores, k=selected_count)
+    selected_indices = filtered_indices[candidate_order]
     selected_class_ids = class_ids[selected_indices]
     class_labels = _select_class_labels(
         (*model.detection_config.agent_class_names, model.detection_config.agent_none_class_name),
@@ -908,10 +966,12 @@ def _summarize_agent_outputs(
     selected_futures = futures[selected_indices, mode_ids]
     future_displacements = _inverse_symlog(selected_futures)
     future_points = future_displacements + centers_xy[:, None, :]
+    selected_none_scores = none_scores[selected_indices]
     return (
         selected_scores.numpy().astype(np.float32, copy=False),
         selected_class_ids.numpy().astype(np.int32, copy=False),
         class_labels,
+        selected_none_scores.numpy().astype(np.float32, copy=False),
         agent_boxes.numpy().astype(np.float32, copy=False),
         mode_ids.numpy().astype(np.int32, copy=False),
         future_points.numpy().astype(np.float32, copy=False),
@@ -922,6 +982,7 @@ def _summarize_map_outputs(
     backbone_output: MonoDriveBackboneOutput,
     model: MonoDriveBackbone,
     top_k: int,
+    confidence_threshold: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     detection_output = backbone_output.detection_output
     class_logits = detection_output.map_class_logits[0].detach().to(dtype=torch.float32).cpu()
@@ -938,9 +999,19 @@ def _summarize_map_outputs(
             np.empty((0, model.detection_config.map_point_count, 2), dtype=np.float32),
         )
     candidate_scores = query_scores[non_none_indices]
-    selected_count = min(top_k, int(candidate_scores.numel()))
-    selected_scores, candidate_order = torch.topk(candidate_scores, k=selected_count)
-    selected_indices = non_none_indices[candidate_order]
+    confidence_mask = candidate_scores >= confidence_threshold
+    filtered_indices = non_none_indices[confidence_mask]
+    filtered_scores = candidate_scores[confidence_mask]
+    if int(filtered_scores.numel()) == 0:
+        return (
+            np.empty((0,), dtype=np.float32),
+            np.empty((0,), dtype=np.int32),
+            np.empty((0,), dtype=object),
+            np.empty((0, model.detection_config.map_point_count, 2), dtype=np.float32),
+        )
+    selected_count = min(top_k, int(filtered_scores.numel()))
+    selected_scores, candidate_order = torch.topk(filtered_scores, k=selected_count)
+    selected_indices = filtered_indices[candidate_order]
     selected_class_ids = class_ids[selected_indices]
     class_labels = _select_class_labels(
         (*model.detection_config.map_class_names, model.detection_config.map_none_class_name),
@@ -1151,6 +1222,14 @@ def _validate_positive_int(value: int, field_name: str) -> None:
         raise ValueError(f"{field_name} 必须为正整数，实际为 {value}。")
 
 
+def _validate_confidence_threshold(value: float, field_name: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"{field_name} 必须为 [0, 1] 区间内的浮点数，实际为 {value!r}。")
+    threshold = float(value)
+    if threshold < 0.0 or threshold > 1.0:
+        raise ValueError(f"{field_name} 必须在 [0, 1] 区间内，实际为 {threshold}。")
+
+
 def _default_output_path(h5_path: Path, sample_index: int, output_dir: Path) -> Path:
     return output_dir / f"{h5_path.stem}_backbone_feature_pca_{sample_index:06d}.png"
 
@@ -1197,6 +1276,18 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_MAP_TOP_K,
         help="模型输出 BEV 面板绘制的 Map 数量，默认显示完整 32 个查询。",
     )
+    parser.add_argument(
+        "--agent-confidence-threshold",
+        type=float,
+        default=DEFAULT_AGENT_CONFIDENCE_THRESHOLD,
+        help="Agent 检测 query 的最低 argmax 类别概率，低于该阈值的非 none query 不绘制。",
+    )
+    parser.add_argument(
+        "--map-confidence-threshold",
+        type=float,
+        default=DEFAULT_MAP_CONFIDENCE_THRESHOLD,
+        help="Map 检测 query 的最低 argmax 类别概率，低于该阈值的非 none query 不绘制。",
+    )
     args = parser.parse_args(argv)
 
     project_root = PROJECT_ROOT.resolve()
@@ -1212,6 +1303,8 @@ def main(argv: list[str] | None = None) -> int:
         trajectory_top_k=args.trajectory_top_k,
         agent_top_k=args.agent_top_k,
         map_top_k=args.map_top_k,
+        agent_confidence_threshold=args.agent_confidence_threshold,
+        map_confidence_threshold=args.map_confidence_threshold,
     )
     print(rendered_path)
     return 0

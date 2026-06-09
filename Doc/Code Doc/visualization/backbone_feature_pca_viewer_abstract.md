@@ -30,7 +30,7 @@
 | `run_backbone_feature_pca_sample` | 固定覆盖精度为 FP32，其余结构配置来自 `config/backbone.toml`。 |
 | `render_backbone_feature_pca_sample` | 输出路径必须位于项目目录内。 |
 | `render_visualization` | 只消费真实主干生成的数据，不执行模型逻辑。 |
-| `main` | 命令行运行，默认输出到项目内 `visualization/outputs/backbone_feature_pca/`，可用 `--checkpoint` 加载真实模型权重，也可用 `--agent-top-k` 和 `--map-top-k` 临时减少显示数量。 |
+| `main` | 命令行运行，默认输出到项目内 `visualization/outputs/backbone_feature_pca/`，可用 `--checkpoint` 加载真实模型权重，也可用 `--agent-top-k`、`--map-top-k` 和 `--agent-confidence-threshold` / `--map-confidence-threshold` 控制检测绘制数量与置信度过滤。 |
 
 ## 5. 最小使用示例
 
@@ -40,8 +40,8 @@
 
 - 可视化必须继续调用 `MonoDriveBackbone`，不要复制主干或 RoPE 逻辑。
 - 脚本固定 FP32 运行，避免本机 BF16 过慢。
-- 模型输出 BEV 面板默认最多检查 16 个 Agent 和 32 个 Map，只绘制最高概率类别不是 `none` 的 query，不替代正式推理后处理。
-- 每个检测 query 在包含 `none` 的完整类别 softmax 上取最高概率类别；`none` query 会被过滤，非 `none` 标签格式为 `class:probability`。
+- 模型输出 BEV 面板默认最多检查 16 个 Agent 和 32 个 Map，只绘制最高概率类别不是 `none` 且 argmax 概率不低于阈值的 query，不替代正式推理后处理。
+- 每个检测 query 在包含 `none` 的完整类别 softmax 上取最高概率类别；`none` query 会被过滤，非 `none` 标签格式为 `class:argmax_prob none:none_prob`。
 - 轨迹诊断栏显示 top-k 词表概率、概率质量、归一化熵，以及 top-k raw residual 和米制 correction；它只用于诊断，不替代训练 loss。
 - `--checkpoint` 严格加载模型 state dict，不允许结构不匹配时静默继续。
 - 修改输出统计或命令行参数时，同步更新完整文档和 `doc/Code Doc/Index.md`。
@@ -50,6 +50,8 @@
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
+| 2026-06-09 | 1os3_Composer | AI 完成：已绘制 Agent 标签同时显示 argmax 类别概率和 `none` 概率。 |
+| 2026-06-09 | 1os3_Composer | AI 完成：记录 Agent/Map argmax 置信度阈值过滤参数。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：同步 16 层主干和 Agent 16 / Map 32 默认展示数量摘要。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：记录轨迹词表概率与 top-k residual 修正诊断栏。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：记录检测 BEV 面板过滤最高概率类别为 `none` 的 query。 |

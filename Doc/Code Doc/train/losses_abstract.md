@@ -21,7 +21,7 @@
 
 ## 4. 使用规范
 
-传入 `MonoDriveBackboneOutput` 和 `TrainingBatchLabels`。轨迹词表分数在 loss 内部使用 `log_softmax` 计算 soft CE；Agent / Map 分类 CE 传入 raw logits，并按 `detection_class_weights.mode` 选择 `auto`（匹配 / 未匹配分离 Focal Loss）、`manual` 或 `disabled`。`auto` 对匹配 query 只在前景类上竞争，背景组按 `sqrt(N_fg/N_bg)` 自动缩放；mode CE 只监督存在有效 future 点的匹配 query。
+传入 `MonoDriveBackboneOutput` 和 `TrainingBatchLabels`。轨迹词表分数在 loss 内部使用 `log_softmax` 计算 soft CE；Agent / Map 分类 CE 传入 raw logits，并按 `detection_class_weights.mode` 选择 `auto`（匹配 / 未匹配分离 Focal Loss）、`manual` 或 `disabled`。`auto` 对匹配 query 只在前景类上竞争，背景组按 `sqrt(N_fg/N_bg)` 自动缩放；mode CE 只监督存在有效 future 点的匹配 query。训练日志会额外输出 Agent / Map 分类 CE 的 none 与 non-none 分项，便于分别观察匹配与未匹配 query 的学习情况。
 
 ## 5. 最小示例
 
@@ -35,6 +35,7 @@
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
+| 2026-06-09 | 1os3_Composer | AI 完成：同步检测分类 CE none / non-none 分项日志摘要。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：同步 Agent 16 / Map 32 loss shape 摘要。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：同步自动检测分类权重的 logits 梯度预算口径。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：同步检测分类 none / non-none 类别权重摘要。 |

@@ -36,6 +36,14 @@ class TrainingLossOutput(NamedTuple):
     components: dict[str, torch.Tensor]
 
 
+class _DetectionClassLossBreakdown(NamedTuple):
+    """检测分类 loss 的 none / non-none 分项。"""
+
+    total: torch.Tensor
+    non_none: torch.Tensor
+    none: torch.Tensor
+
+
 class MonoDriveTrainingLoss(nn.Module):
     """汇总规划、Agent 和 Map 训练 loss。
 
@@ -65,14 +73,16 @@ class MonoDriveTrainingLoss(nn.Module):
     ) -> TrainingLossOutput:
         """计算单个 batch 的总 loss。"""
 
+        agent_class_breakdown = self._agent_class_ce(model_output, labels)
+        map_class_breakdown = self._map_class_ce(model_output, labels)
         raw_components = {
             "trajectory_logit_soft_ce": self._trajectory_logit_soft_ce(model_output, labels),
             "trajectory_residual_mse": self._trajectory_residual_mse(model_output, labels),
-            "agent_class_ce": self._agent_class_ce(model_output, labels),
+            "agent_class_ce": agent_class_breakdown.total,
             "agent_state_mse": self._agent_state_mse(model_output, labels),
             "agent_mode_ce": self._agent_mode_ce(model_output, labels),
             "agent_future_mse": self._agent_future_mse(model_output, labels),
-            "map_class_ce": self._map_class_ce(model_output, labels),
+            "map_class_ce": map_class_breakdown.total,
             "map_point_mse": self._map_point_mse(model_output, labels),
         }
         weighted_components = {
@@ -80,7 +90,15 @@ class MonoDriveTrainingLoss(nn.Module):
             for name, component in raw_components.items()
         }
         total_loss = sum(weighted_components.values())
-        components = {**raw_components, **weighted_components, "total_loss": total_loss}
+        components = {
+            **raw_components,
+            **weighted_components,
+            "agent_class_ce_non_none": agent_class_breakdown.non_none,
+            "agent_class_ce_none": agent_class_breakdown.none,
+            "map_class_ce_non_none": map_class_breakdown.non_none,
+            "map_class_ce_none": map_class_breakdown.none,
+            "total_loss": total_loss,
+        }
         return TrainingLossOutput(total_loss=total_loss, components=components)
 
     def _trajectory_logit_soft_ce(
@@ -114,7 +132,7 @@ class MonoDriveTrainingLoss(nn.Module):
         self,
         model_output: MonoDriveBackboneOutput,
         labels: TrainingBatchLabels,
-    ) -> torch.Tensor:
+    ) -> _DetectionClassLossBreakdown:
         logits = model_output.detection_output.agent_class_logits.to(dtype=torch.float32)
         targets = labels.agent.class_targets.to(device=logits.device, dtype=torch.long)
         return _detection_class_cross_entropy(
@@ -161,10 +179,10 @@ class MonoDriveTrainingLoss(nn.Module):
         self,
         model_output: MonoDriveBackboneOutput,
         labels: TrainingBatchLabels,
-    ) -> torch.Tensor:
+    ) -> _DetectionClassLossBreakdown:
         logits = model_output.detection_output.map_class_logits.to(dtype=torch.float32)
         targets = labels.map.class_targets.to(device=logits.device, dtype=torch.long)
-        loss = _detection_class_cross_entropy(
+        breakdown = _detection_class_cross_entropy(
             logits=logits,
             targets=targets,
             none_index=int(logits.shape[-1]) - 1,
@@ -174,7 +192,7 @@ class MonoDriveTrainingLoss(nn.Module):
             name="map_class_ce",
         )
         if self.detection_class_weights.mode != "auto":
-            return loss
+            return breakdown
         point_count = int(model_output.detection_output.map_points.shape[-2])
         point_dim = int(model_output.detection_output.map_points.shape[-1])
         foreground_class_count = int(logits.shape[-1]) - 1
@@ -182,7 +200,11 @@ class MonoDriveTrainingLoss(nn.Module):
         auto_scale = (
             regression_dims / max(foreground_class_count, 1)
         ) ** _MAP_CLASS_AUTO_SCALE_EXPONENT
-        return loss * auto_scale
+        return _DetectionClassLossBreakdown(
+            total=breakdown.total * auto_scale,
+            non_none=breakdown.non_none * auto_scale,
+            none=breakdown.none * auto_scale,
+        )
 
     def _map_point_mse(
         self,
@@ -228,7 +250,7 @@ def _detection_class_cross_entropy(
     non_none_weight: float,
     none_weight: float,
     name: str,
-) -> torch.Tensor:
+) -> _DetectionClassLossBreakdown:
     if logits.ndim < 2:
         raise ValueError(f"{name} logits 至少需要 2 维，实际 shape 为 {tuple(logits.shape)}。")
     class_count = int(logits.shape[-1])
@@ -246,8 +268,9 @@ def _detection_class_cross_entropy(
 
     flat_logits = logits.reshape(-1, class_count)
     flat_targets = targets.reshape(-1)
+    zero_loss = flat_logits.sum() * 0.0
     if flat_targets.numel() == 0:
-        return flat_logits.sum() * 0.0
+        return _DetectionClassLossBreakdown(total=zero_loss, non_none=zero_loss, none=zero_loss)
     target_min = int(flat_targets.amin().item())
     target_max = int(flat_targets.amax().item())
     if target_min < 0 or target_max >= class_count:
@@ -257,7 +280,7 @@ def _detection_class_cross_entropy(
         )
 
     if weight_config.mode == "disabled":
-        return _mean_cross_entropy(flat_logits, flat_targets)
+        return _mean_cross_entropy_breakdown(flat_logits, flat_targets, none_index)
     if weight_config.mode == "manual":
         class_weight = _constant_detection_class_weight(
             class_count=class_count,
@@ -266,7 +289,12 @@ def _detection_class_cross_entropy(
             none_weight=none_weight,
             device=targets.device,
         )
-        return _weighted_cross_entropy(flat_logits, flat_targets, class_weight)
+        return _weighted_cross_entropy_breakdown(
+            flat_logits,
+            flat_targets,
+            class_weight,
+            none_index,
+        )
     return _group_normalized_focal_loss(
         logits=flat_logits,
         targets=flat_targets,
@@ -291,11 +319,62 @@ def _constant_detection_class_weight(
     return class_weight
 
 
+def _mean_cross_entropy_breakdown(
+    logits: torch.Tensor,
+    targets: torch.Tensor,
+    none_index: int,
+) -> _DetectionClassLossBreakdown:
+    zero_loss = logits.sum() * 0.0
+    none_mask = targets == none_index
+    non_none_mask = ~none_mask
+    non_none_loss = (
+        _mean_cross_entropy(logits[non_none_mask], targets[non_none_mask])
+        if bool(non_none_mask.any().item())
+        else zero_loss
+    )
+    none_loss = (
+        _mean_cross_entropy(logits[none_mask], targets[none_mask])
+        if bool(none_mask.any().item())
+        else zero_loss
+    )
+    return _DetectionClassLossBreakdown(
+        total=_mean_cross_entropy(logits, targets),
+        non_none=non_none_loss,
+        none=none_loss,
+    )
+
+
+def _weighted_cross_entropy_breakdown(
+    logits: torch.Tensor,
+    targets: torch.Tensor,
+    class_weight: torch.Tensor,
+    none_index: int,
+) -> _DetectionClassLossBreakdown:
+    zero_loss = logits.sum() * 0.0
+    none_mask = targets == none_index
+    non_none_mask = ~none_mask
+    non_none_loss = (
+        _weighted_cross_entropy(logits[non_none_mask], targets[non_none_mask], class_weight)
+        if bool(non_none_mask.any().item())
+        else zero_loss
+    )
+    none_loss = (
+        _weighted_cross_entropy(logits[none_mask], targets[none_mask], class_weight)
+        if bool(none_mask.any().item())
+        else zero_loss
+    )
+    return _DetectionClassLossBreakdown(
+        total=_weighted_cross_entropy(logits, targets, class_weight),
+        non_none=non_none_loss,
+        none=none_loss,
+    )
+
+
 def _group_normalized_focal_loss(
     logits: torch.Tensor,
     targets: torch.Tensor,
     none_index: int,
-) -> torch.Tensor:
+) -> _DetectionClassLossBreakdown:
     """匹配 / 未匹配分离的分组 Focal Loss。
 
     匹配 query 只在前景类上竞争（none 不参与 softmax），并额外用 objectness BCE
@@ -336,6 +415,7 @@ def _group_normalized_focal_loss(
             background_gamma,
         ).mean()
 
+    zero_loss = logits.sum() * 0.0
     if foreground_loss is not None and background_loss is not None:
         foreground_count = non_none_mask.sum().to(dtype=torch.float32)
         background_count = none_mask.sum().to(dtype=torch.float32)
@@ -343,12 +423,25 @@ def _group_normalized_focal_loss(
             min=_AUTO_BACKGROUND_SCALE_MIN,
             max=_AUTO_BACKGROUND_SCALE_MAX,
         )
-        return foreground_loss + background_scale * background_loss
+        scaled_background_loss = background_scale * background_loss
+        return _DetectionClassLossBreakdown(
+            total=foreground_loss + scaled_background_loss,
+            non_none=foreground_loss,
+            none=scaled_background_loss,
+        )
     if foreground_loss is not None:
-        return foreground_loss
+        return _DetectionClassLossBreakdown(
+            total=foreground_loss,
+            non_none=foreground_loss,
+            none=zero_loss,
+        )
     if background_loss is not None:
-        return background_loss
-    return logits.sum() * 0.0
+        return _DetectionClassLossBreakdown(
+            total=background_loss,
+            non_none=zero_loss,
+            none=background_loss,
+        )
+    return _DetectionClassLossBreakdown(total=zero_loss, non_none=zero_loss, none=zero_loss)
 
 
 def _auto_focal_gamma(logits: torch.Tensor, targets: torch.Tensor) -> float:

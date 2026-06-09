@@ -44,6 +44,7 @@
   - `top_trajectory_residuals`: `[K, 6, 2]`，模型输出的 top-k raw residual，来自 `tanh` 后的归一化空间。
   - `top_trajectory_corrections`: `[K, 6, 2]`，修正后轨迹相对词表基准轨迹的米制位移。
   - `agent_boxes`: `[A, 6]`，`[x, y, l, w, h, yaw]`。
+  - `agent_none_scores`: `[A]`，完整类别 softmax 上的 `none` 概率。
   - `agent_future_points`: `[A, 6, 2]`，ego 坐标系米制 future。
   - `map_points`: `[M, 100, 2]`，ego 坐标系米制 Map 点。
 
@@ -73,7 +74,7 @@
 | `top_trajectory_points` | `[5, 6, 2]` | 轨迹 top-k，`vocab_symlog + residual * symlog_scale` 后反 Symlog 到米制。 |
 | `top_trajectory_residuals` | `[5, 6, 2]` | top-k 轨迹 raw residual，仍在模型 residual 输出空间。 |
 | `top_trajectory_corrections` | `[5, 6, 2]` | top-k 轨迹 residual 生效后的米制修正量，即修正后轨迹减词表基准轨迹。 |
-| `agent_boxes` | `[A, 6]` | Agent 查询，`A <= 16`；每个 query 先取包含 `none` 在内的类别 softmax argmax，若 argmax 为 `none` 则不绘制。 |
+| `agent_boxes` | `[A, 6]` | Agent 查询，`A <= 16`；每个 query 先取包含 `none` 在内的类别 softmax argmax，若 argmax 为 `none` 则不绘制；绘制标签同时显示 argmax 类别概率和 `none` 概率。 |
 | `map_points` | `[M, 100, 2]` | Map 查询，`M <= 32`；每个 query 先取包含 `none` 在内的类别 softmax argmax，若 argmax 为 `none` 则不绘制。 |
 | 输出 PNG | image file | 主干诊断图。 |
 
@@ -83,7 +84,7 @@
 
 模型调用路径是 `MonoDriveBackbone(..., return_layer_features=True)`。每层视觉 Token 根据 `latent_grid_shape` reshape 为 `[T, H, W, D]`，再转为 `[D, T, H, W]` 做通道 PCA。PCA 只用于诊断，不参与模型训练或推理逻辑。
 
-模型输出 BEV 面板从同一次 `MonoDriveBackboneOutput` 中读取检测和轨迹输出。轨迹使用 Softmax 选择 top-k 词表项，把 `trajectory_vocab_symlog + predicted_residual * symlog_scale` 反 Symlog 到米制轨迹。右下角轨迹诊断栏额外显示完整词表概率数量、top-k 概率质量、归一化熵、每条 top 轨迹的概率条、raw residual 最大值、米制 residual correction 的 mean/max 以及最后一个 future 点的 correction。Agent 输出对每个 query 在包含 `none` 的完整类别 softmax 上取最高概率类别；若最高类别不是 `none`，才进入绘制候选并按该概率取 top-k，对 `x/y/v/future` 使用反 Symlog、对 `l/w/h` 使用 `expm1`，并用 `[sin_yaw, cos_yaw]` 反求 yaw。Map 输出同样过滤 `none` query 后再取 top-k，对点坐标反 Symlog 后绘制 polyline。`--agent-top-k` 和 `--map-top-k` 可用于临时减少绘制数量。
+模型输出 BEV 面板从同一次 `MonoDriveBackboneOutput` 中读取检测和轨迹输出。轨迹使用 Softmax 选择 top-k 词表项，把 `trajectory_vocab_symlog + predicted_residual * symlog_scale` 反 Symlog 到米制轨迹。右下角轨迹诊断栏额外显示完整词表概率数量、top-k 概率质量、归一化熵、每条 top 轨迹的概率条、raw residual 最大值、米制 residual correction 的 mean/max 以及最后一个 future 点的 correction。Agent 输出对每个 query 在包含 `none` 的完整类别 softmax 上取最高概率类别；若最高类别不是 `none`，且 argmax 概率不低于 `--agent-confidence-threshold`，才进入绘制候选并按该概率取 top-k，对 `x/y/v/future` 使用反 Symlog、对 `l/w/h` 使用 `expm1`，并用 `[sin_yaw, cos_yaw]` 反求 yaw。BEV 标签格式为 `class:argmax_prob none:none_prob`。Map 输出同样过滤 `none` query 和低于 `--map-confidence-threshold` 的 query 后再取 top-k，对点坐标反 Symlog 后绘制 polyline。`--agent-top-k` 和 `--map-top-k` 可用于临时减少绘制数量。
 
 输出路径通过项目根目录校验，默认写入 `visualization/outputs/backbone_feature_pca/`。
 
@@ -101,6 +102,8 @@
 | `--trajectory-top-k` | `5` | 模型输出 BEV 面板绘制的轨迹 top-k 数量。 |
 | `--agent-top-k` | `16` | 模型输出 BEV 面板最多绘制的非 `none` Agent 查询数量。 |
 | `--map-top-k` | `32` | 模型输出 BEV 面板最多绘制的非 `none` Map 查询数量。 |
+| `--agent-confidence-threshold` | `0.0` | Agent query 在完整类别 softmax 上的 argmax 概率下限；低于该阈值的非 `none` query 不绘制。 |
+| `--map-confidence-threshold` | `0.0` | Map query 在完整类别 softmax 上的 argmax 概率下限；低于该阈值的非 `none` query 不绘制。 |
 
 ## 7. 依赖关系
 
@@ -115,7 +118,7 @@
 - 本脚本固定以 FP32 调用主干和视觉嵌入，避免本机 BF16 过慢。
 - 诊断图中的 PCA RGB 只用于观察特征空间结构，不代表注意力权重或 loss。
 - 模型输出 BEV 面板只做诊断级反变换和排序展示，不替代正式推理后处理、NMS、Hungarian matching 或安全过滤。
-- Detection query 的显示类别来自该 query 在包含 `none` 的完整类别 softmax 上的 argmax；argmax 为 `none` 的 query 会被过滤，不进入 BEV 绘制。
+- Detection query 的显示类别来自该 query 在包含 `none` 的完整类别 softmax 上的 argmax；argmax 为 `none` 或 argmax 概率低于对应置信度阈值的 query 会被过滤，不进入 BEV 绘制。已绘制的 Agent 标签会同时显示 argmax 类别概率和 `none` 概率。
 - 轨迹诊断栏的 `raw|max` 是 top-k residual 张量的绝对值最大值；`meter mean/max` 和 `final delta` 是 residual 生效后相对词表基准轨迹的米制修正。
 - `--checkpoint` 使用严格 `load_state_dict`，checkpoint 结构不匹配时应直接报错。
 - CPU 上运行会加载 DINOv3 和完整 16 层主干，可能耗时较长。
@@ -125,6 +128,8 @@
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
+| 2026-06-09 | 1os3_Composer | AI 完成：已绘制 Agent 标签同时显示 argmax 类别概率和 `none` 概率。 |
+| 2026-06-09 | 1os3_Composer | AI 完成：新增 Agent/Map 检测 query 的 argmax 置信度阈值过滤，并暴露 `--agent-confidence-threshold` 与 `--map-confidence-threshold`。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：同步 16 层主干、2614 序列长度和 Agent 16 / Map 32 默认展示数量。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：新增轨迹词表概率与 top-k residual 修正诊断栏，并记录 raw residual 与米制 correction。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：检测输出 BEV 面板过滤最高概率类别为 `none` 的 Agent/Map query。 |
