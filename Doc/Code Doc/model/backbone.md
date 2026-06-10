@@ -86,11 +86,11 @@
 
 前 12 层（0-based index `0–11`）每层 Transformer block 结束后执行旁路更新，避免注意力直接破坏检测查询的初始均匀 anchor 分布：
 
-$$\text{Acc}_0 = \text{Query} + W_0(\text{Out}_0)$$
+$$\text{Acc}_0 = \text{Query} + W_0(\mathrm{RMSNorm}_0(\text{Out}_0))$$
 
-$$\text{Acc}_i = \text{Acc}_{i-1} + W_i(\text{Out}_i),\quad i = 1,\ldots,11$$
+$$\text{Acc}_i = \text{Acc}_{i-1} + W_i(\mathrm{RMSNorm}_i(\text{Out}_i)),\quad i = 1,\ldots,11$$
 
-其中 `Query` 为 FP32 初始检测查询，`Out_i` 为第 $i$ 层 block 输出的检测切片，`W_i` 为独立的零初始化线性层。写回序列时使用 $\text{Acc}_i + E_i$，$E_i$ 为第 $i$ 层专用 agent/map 身份嵌入（`detection_layer_identity_embeddings`，零初始化）。检测路径不再使用全局 `token_type_embeddings` 中的 `agent`/`map`。
+其中 `Query` 为 FP32 初始检测查询，`Out_i` 为第 $i$ 层 block 输出的检测切片，`RMSNorm_i` 为独立的 `TokenRMSNorm`（`detection_residual_norms`，权重初始化为 1），`W_i` 为独立的零初始化线性层（`detection_residual_projections`）。写回序列时使用 $\text{Acc}_i + E_i$，$E_i$ 为第 $i$ 层专用 agent/map 身份嵌入（`detection_layer_identity_embeddings`，零初始化）。检测路径不再使用全局 `token_type_embeddings` 中的 `agent`/`map`。
 
 解码器输入为 $\text{Acc}_{11}$ cast 到 FP32，**不加** $E_{11}$。第 13-16 层不再执行旁路写回，检测 Token 作为规划上下文随 Transformer 自然更新，不再接检测监督。
 
@@ -99,7 +99,7 @@ $$\text{Acc}_i = \text{Acc}_{i-1} + W_i(\text{Out}_i),\quad i = 1,\ldots,11$$
 | 区域 | 精度 |
 | --- | --- |
 | `DetectionQueryEmbedding` 输出 | FP32 |
-| 骨干中间（Transformer、$W_i$、$E_i$、$\text{Acc}_i$、序列 detection 切片） | `backbone_torch_dtype`（默认 BF16） |
+| 骨干中间（Transformer、$\mathrm{RMSNorm}_i$、$W_i$、$E_i$、$\text{Acc}_i$、序列 detection 切片） | `backbone_torch_dtype`（默认 BF16） |
 | `DetectionHeadDecoder` | FP32 |
 
 视觉位置坐标由 `VisionEmbeddingOutput.latent_grid_shape` 构造。视觉 token 展平顺序为 `[T, H, W]`，但传给 3D RoPE 的坐标最后一维按 `[H, W, T]`。每个轴都归一化到 `[-1, 1]`，并以 0 为中心。
@@ -126,7 +126,7 @@ FFN 结构严格为 $(D \rightarrow 4D)_{\mathrm{Layer1}} \rightarrow \mathrm{Sw
 | `ego_motion.*` | `config/backbone.toml` | 自车运动嵌入口径。 |
 | `precision.*` | `config/backbone.toml` | 主干和注意力精度。 |
 
-12 层检测残差投影和 12 层检测身份嵌入的零初始化是结构性约束，不在 `config/backbone.toml` 中开放为可调项；改成非零初始化会破坏「初始化时检测解码输入等于初始检测查询」的约定。
+12 层检测残差投影和 12 层检测身份嵌入的零初始化是结构性约束，不在 `config/backbone.toml` 中开放为可调项；改成非零初始化会破坏「初始化时检测解码输入等于初始检测查询」的约定。12 层检测残差 RMSNorm 复用 `architecture.rms_norm_eps`，权重默认初始化为 1。
 
 ## 7. 依赖关系
 
@@ -148,6 +148,7 @@ FFN 结构严格为 $(D \rightarrow 4D)_{\mathrm{Layer1}} \rightarrow \mathrm{Sw
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
+| 2026-06-10 | 1os3_Cursor | AI 完成：检测旁路残差投影前新增 12 层逐层 TokenRMSNorm（`detection_residual_norms`）。 |
 | 2026-06-10 | 1os3_Cursor | AI 完成：检测 Token 改为前 12 层逐层旁路残差、per-layer 身份嵌入；解码输入为 Acc_11 cast FP32；骨干中间 BF16。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：记录 16 层两阶段主干、Agent 16 / Map 32 检测查询、第 12 层检测监督和第 13 层 Goal Token 注入。 |
 | 2026-06-07 | 1os3_Codex | AI 完成：检测解码改为初始检测查询加零初始化线性残差。 |

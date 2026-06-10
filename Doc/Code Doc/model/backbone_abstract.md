@@ -23,7 +23,7 @@
 | `load_backbone_config` | TOML 路径 | `BackboneConfig` |
 | `override_backbone_precision` | `BackboneConfig` 和 dtype 名称 | 新的 `BackboneConfig` |
 
-检测解码：`Acc_{11}: [B, 48, 384]`（骨干精度）cast 到 FP32 后送入 `DetectionHeadDecoder`。前 12 层每层通过零初始化 $W_i$ 和 $E_i$ 做旁路残差与写回；`Query`（FP32）为累积种子。
+检测解码：`Acc_{11}: [B, 48, 384]`（骨干精度）cast 到 FP32 后送入 `DetectionHeadDecoder`。前 12 层每层先经逐层 `TokenRMSNorm`，再通过零初始化 $W_i$ 和 $E_i$ 做旁路残差与写回；`Query`（FP32）为累积种子。
 
 ## 4. 公开接口使用规范
 
@@ -41,7 +41,7 @@
 ## 6. 维护注意事项
 
 - RoPE 只作用于视觉 Token，基频从 `config/backbone.toml` 读取，当前为 `100.0`。
-- 12 层检测残差投影和 12 层检测身份嵌入的初始权重必须为零；训练中正常学习。
+- 12 层检测残差 RMSNorm 与 12 层检测残差投影、12 层检测身份嵌入一一对应；残差投影和身份嵌入的初始权重必须为零，RMSNorm 权重默认为 1；训练中正常学习。
 - 检测路径使用 per-layer 身份嵌入，不复用全局 `agent`/`map`。
 - 第 1-12 层不能包含目标点 Token；第 13-16 层使用单路 FFN。
 - 检测监督固定使用第 12 层旁路累积；最终层只直接监督轨迹词表概率和残差。
@@ -54,6 +54,7 @@
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
+| 2026-06-10 | 1os3_Cursor | AI 完成：同步检测旁路残差投影前逐层 TokenRMSNorm 摘要。 |
 | 2026-06-10 | 1os3_Cursor | AI 完成：同步逐层旁路残差、per-layer 检测身份嵌入和 FP32/BF16 精度边界摘要。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：同步 16 层两阶段主干、Agent 16 / Map 32 检测查询和第 12 层检测监督摘要。 |
 | 2026-06-07 | 1os3_Codex | AI 完成：记录检测查询加零初始化残差的解码口径。 |

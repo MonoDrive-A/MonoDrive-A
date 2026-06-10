@@ -555,6 +555,10 @@ class MonoDriveBackbone(nn.Module):
         self.detection_query_embedding = DetectionQueryEmbedding(self.detection_config)
         self.trajectory_decoder = TrajectoryVocabularyDecoder(self.trajectory_config)
         self.detection_decoder = DetectionHeadDecoder(self.detection_config)
+        self.detection_residual_norms = nn.ModuleList(
+            TokenRMSNorm(config.hidden_dim, config.rms_norm_eps)
+            for _ in range(GOAL_TOKEN_INSERT_LAYER_INDEX)
+        )
         self.detection_residual_projections = nn.ModuleList(
             nn.Linear(config.hidden_dim, config.hidden_dim)
             for _ in range(GOAL_TOKEN_INSERT_LAYER_INDEX)
@@ -925,6 +929,7 @@ class MonoDriveBackbone(nn.Module):
             写回检测切片后的 `token_features` 与更新后的 `accumulated_detection_queries`。
         """
         detection_output = token_features[:, token_slices.detection, :]
+        detection_output = self.detection_residual_norms[layer_index](detection_output)
         detection_residual = self.detection_residual_projections[layer_index](detection_output)
         accumulated_detection_queries = accumulated_detection_queries + detection_residual
         updated_detection_tokens = self._add_detection_layer_identity_embeddings(
