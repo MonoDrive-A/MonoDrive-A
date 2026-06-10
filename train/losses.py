@@ -133,7 +133,7 @@ class MonoDriveTrainingLoss(nn.Module):
             weight_config=self.detection_class_weights,
             non_none_weight=non_none_weight,
             none_weight=none_weight,
-            focal_gamma=self.detection_class_weights.focal_gamma,
+            focal_gamma=self.detection_class_weights.agent_focal_gamma,
             name="agent_class_ce",
         )
 
@@ -182,7 +182,7 @@ class MonoDriveTrainingLoss(nn.Module):
             weight_config=self.detection_class_weights,
             non_none_weight=non_none_weight,
             none_weight=none_weight,
-            focal_gamma=self.detection_class_weights.focal_gamma,
+            focal_gamma=self.detection_class_weights.map_focal_gamma,
             name="map_class_ce",
         )
 

@@ -41,7 +41,7 @@
 
 轨迹词表概率监督使用 `trajectory_logit_soft_ce` 权重，对模型 raw logits 使用 soft cross entropy。标签由 `train/data_processing.py` 在物理空间按 inverse-MSE 构造，并保持为和为 1 的概率分布。
 
-Agent / Map 分类 CE 可通过 `[detection_class_weights]` 控制 none 与 non-none 组的相对权重。默认 `mode = "auto"` 时，`train/losses.py` 使用标准 Focal Loss（``γ = focal_gamma``，``α_t`` 由组权重映射）；`mode = "manual"` 使用相同公式但由用户手动指定 ``α_t``；`mode = "disabled"` 时保持未加类别权重的 CE。
+Agent / Map 分类 CE 可通过 `[detection_class_weights]` 控制 none 与 non-none 组的相对权重。默认 `mode = "auto"` 时，`train/losses.py` 使用标准 Focal Loss（Agent / Map 各自使用 ``agent_focal_gamma`` / ``map_focal_gamma`` 与 ``agent_focal_alpha`` / ``map_focal_alpha``）；`mode = "manual"` 使用相同公式但由用户手动指定 ``α_t``；`mode = "disabled"` 时保持未加类别权重的 CE。
 
 ## 6. 配置项
 
@@ -59,8 +59,10 @@ Agent / Map 分类 CE 可通过 `[detection_class_weights]` 控制 none 与 non-
 | `optimization.cosine_decay_steps` | `5000` | 末尾余弦退火 step 数。 |
 | `loss_weights.*` | `1.0` | 各项 loss 权重。 |
 | `detection_class_weights.mode` | `auto` | 检测分类类别权重模式，支持 `auto` / `manual`（标准 Focal Loss）、`disabled`。 |
-| `detection_class_weights.focal_gamma` | `2.0` | 标准 Focal Loss 的 ``γ``。 |
-| `detection_class_weights.focal_alpha` | `0.25` | 标准 Focal Loss 的 ``α``；`auto` 模式下 none 类 ``α_t = 1 - focal_alpha``。 |
+| `detection_class_weights.agent_focal_gamma` | `2.0` | Agent 标准 Focal Loss 的 ``γ``。 |
+| `detection_class_weights.map_focal_gamma` | `2.0` | Map 标准 Focal Loss 的 ``γ``。 |
+| `detection_class_weights.agent_focal_alpha` | `0.25` | Agent 标准 Focal Loss 的 ``α``；`auto` 模式下 none 类 ``α_t = 1 - agent_focal_alpha``。 |
+| `detection_class_weights.map_focal_alpha` | `0.25` | Map 标准 Focal Loss 的 ``α``；`auto` 模式下 none 类 ``α_t = 1 - map_focal_alpha``。 |
 | `detection_class_weights.agent_non_none_weight` | `0.25` | `manual` 模式下 Agent 前景类 ``α_t``。 |
 | `detection_class_weights.agent_none_weight` | `0.75` | `manual` 模式下 Agent none 类 ``α_t``。 |
 | `detection_class_weights.map_non_none_weight` | `0.25` | `manual` 模式下 Map 前景类 ``α_t``。 |
@@ -85,6 +87,7 @@ Agent / Map 分类 CE 可通过 `[detection_class_weights]` 控制 none 与 non-
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
+| 2026-06-10 | 1os3_Composer | AI 完成：Focal Loss 超参拆分为 Agent / Map 独立字段。 |
 | 2026-06-09 | 1os3_Composer | AI 完成：检测分类改为标准 Focal Loss，新增 `focal_gamma` 配置。 |
 | 2026-06-09 | 1os3_Composer | AI 完成：同步 `auto` 检测分类全类分组 Focal Loss 与组间权重配置说明。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：自动检测分类权重改为按当前 logits CE 梯度预算调整，默认 non-none 预算为 0.25。 |

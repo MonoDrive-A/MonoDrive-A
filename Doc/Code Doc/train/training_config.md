@@ -42,9 +42,9 @@
 ### `DetectionClassWeightConfig`
 
 - 功能：保存 Agent / Map 分类 CE 的 none / non-none 组权重策略与标准 Focal Loss 超参。
-- 输入：`mode`、`focal_gamma` 与组权重。
+- 输入：`mode`、Agent / Map 各自的 Focal 超参与组权重。
 - 输出：不可变 dataclass，供 `train/losses.py` 构造分类 loss。
-- 关键约束：`mode` 仅支持 `auto`、`manual`、`disabled`；`focal_gamma` 不能为负；组权重不能为负；同一检测分支的 none 与 non-none 权重不能同时为 0。
+- 关键约束：`mode` 仅支持 `auto`、`manual`、`disabled`；`agent_focal_gamma` / `map_focal_gamma` 不能为负；`agent_focal_alpha` / `map_focal_alpha` 必须位于 `[0, 1]`；组权重不能为负；同一检测分支的 none 与 non-none 权重不能同时为 0。
 
 ## 4. 输入输出与 Shape
 
@@ -63,8 +63,10 @@
 | --- | --- | --- |
 | `config/training.toml` | 见配置文件 | 本文件读取的主配置。 |
 | `detection_class_weights.mode` | `auto` | 检测分类 CE 策略；`auto` / `manual` 为标准 Focal Loss，`disabled` 为 CE。 |
-| `detection_class_weights.focal_gamma` | `2.0` | 标准 Focal Loss 的 ``γ``。 |
-| `detection_class_weights.focal_alpha` | `0.25` | 标准 Focal Loss 的 ``α``；`auto` 模式下 none 类 ``α_t = 1 - focal_alpha``。 |
+| `detection_class_weights.agent_focal_gamma` | `2.0` | Agent 标准 Focal Loss 的 ``γ``。 |
+| `detection_class_weights.map_focal_gamma` | `2.0` | Map 标准 Focal Loss 的 ``γ``。 |
+| `detection_class_weights.agent_focal_alpha` | `0.25` | Agent 标准 Focal Loss 的 ``α``；`auto` 模式下 none 类 ``α_t = 1 - agent_focal_alpha``。 |
+| `detection_class_weights.map_focal_alpha` | `0.25` | Map 标准 Focal Loss 的 ``α``；`auto` 模式下 none 类 ``α_t = 1 - map_focal_alpha``。 |
 | `detection_class_weights.*_non_none_weight` | 见配置文件 | `manual` 模式下 Agent / Map 前景类 ``α_t``。 |
 | `detection_class_weights.*_none_weight` | 见配置文件 | `manual` 模式下 Agent / Map none 类 ``α_t``。 |
 
@@ -78,12 +80,13 @@
 
 - 不要在实现文件中写入配置文件已有默认值。
 - 新增训练配置字段时必须同步 dataclass、读取函数、配置文档和摘要文档。
-- `DetectionClassWeightConfig` 只描述权重策略与 `focal_gamma`；标准 Focal Loss 实现在 `train/losses.py` 中。
+- `DetectionClassWeightConfig` 只描述权重策略与 Agent / Map 各自的 Focal 超参；标准 Focal Loss 实现在 `train/losses.py` 中。
 
 ## 9. 维护记录
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
+| 2026-06-10 | 1os3_Composer | AI 完成：`focal_gamma` / `focal_alpha` 拆分为 Agent / Map 独立字段。 |
 | 2026-06-09 | 1os3_Composer | AI 完成：`DetectionClassWeightConfig` 新增 `focal_alpha`，默认 0.25。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：`auto` 模式改为分组归一化 Focal Loss，移除梯度预算相关配置字段。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：新增检测分类 none / non-none 类别权重配置解析。 |

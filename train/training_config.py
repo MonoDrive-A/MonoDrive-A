@@ -152,14 +152,17 @@ class DetectionClassWeightConfig:
     """检测分类 CE 的 none / non-none 类别权重配置。
 
     `auto` / `manual` 模式使用标准 Focal Loss：``-α_t (1 - p_t)^γ log p_t``，
-    其中 ``γ`` 由 ``focal_gamma`` 指定。``auto`` 模式下 ``α_t`` 按 RetinaNet 约定映射：
-    前景类为 ``focal_alpha``，none 类为 ``1 - focal_alpha``；``manual`` 模式改由
+    其中 Agent / Map 各自使用 ``agent_focal_gamma`` / ``map_focal_gamma``。
+    ``auto`` 模式下 ``α_t`` 按 RetinaNet 约定映射：前景类为 ``agent_focal_alpha`` /
+    ``map_focal_alpha``，none 类为 ``1 - focal_alpha``；``manual`` 模式改由
     ``*_non_none_weight`` / ``*_none_weight`` 指定。
     """
 
     mode: str
-    focal_gamma: float
-    focal_alpha: float
+    agent_focal_gamma: float
+    map_focal_gamma: float
+    agent_focal_alpha: float
+    map_focal_alpha: float
     agent_non_none_weight: float
     agent_none_weight: float
     map_non_none_weight: float
@@ -171,16 +174,23 @@ class DetectionClassWeightConfig:
                 "detection_class_weights.mode 仅支持 "
                 f"{sorted(SUPPORTED_DETECTION_CLASS_WEIGHT_MODES)}，实际为 {self.mode!r}。"
             )
-        if self.focal_gamma < 0.0:
-            raise ValueError(f"focal_gamma 不能为负数，实际为 {self.focal_gamma}。")
-        if self.focal_alpha < 0.0 or self.focal_alpha > 1.0:
-            raise ValueError(
-                f"focal_alpha 必须位于 [0, 1]，实际为 {self.focal_alpha}。"
-            )
-        if self.mode == "auto" and self.focal_alpha in (0.0, 1.0):
-            raise ValueError(
-                "auto 模式下 focal_alpha 不能为 0 或 1，否则前景或 none 的 α_t 会为 0。"
-            )
+        for field_name in ("agent_focal_gamma", "map_focal_gamma"):
+            value = getattr(self, field_name)
+            if value < 0.0:
+                raise ValueError(f"{field_name} 不能为负数，实际为 {value}。")
+        for field_name in ("agent_focal_alpha", "map_focal_alpha"):
+            value = getattr(self, field_name)
+            if value < 0.0 or value > 1.0:
+                raise ValueError(f"{field_name} 必须位于 [0, 1]，实际为 {value}。")
+        if self.mode == "auto":
+            if self.agent_focal_alpha in (0.0, 1.0):
+                raise ValueError(
+                    "auto 模式下 agent_focal_alpha 不能为 0 或 1，否则前景或 none 的 α_t 会为 0。"
+                )
+            if self.map_focal_alpha in (0.0, 1.0):
+                raise ValueError(
+                    "auto 模式下 map_focal_alpha 不能为 0 或 1，否则前景或 none 的 α_t 会为 0。"
+                )
         for field_name in (
             "agent_non_none_weight",
             "agent_none_weight",
@@ -200,14 +210,14 @@ class DetectionClassWeightConfig:
 
         if self.mode == "manual":
             return self.agent_non_none_weight, self.agent_none_weight
-        return self.focal_alpha, 1.0 - self.focal_alpha
+        return self.agent_focal_alpha, 1.0 - self.agent_focal_alpha
 
     def map_focal_alpha_weights(self) -> tuple[float, float]:
         """返回 Map 分类 Focal Loss 的 (non_none α, none α)。"""
 
         if self.mode == "manual":
             return self.map_non_none_weight, self.map_none_weight
-        return self.focal_alpha, 1.0 - self.focal_alpha
+        return self.map_focal_alpha, 1.0 - self.map_focal_alpha
 
 
 @dataclass(frozen=True)
@@ -400,8 +410,22 @@ def load_training_run_config(
         ),
         detection_class_weights=DetectionClassWeightConfig(
             mode=_require_string(detection_class_weights_config, "mode"),
-            focal_gamma=_require_float(detection_class_weights_config, "focal_gamma"),
-            focal_alpha=_require_float(detection_class_weights_config, "focal_alpha"),
+            agent_focal_gamma=_require_float(
+                detection_class_weights_config,
+                "agent_focal_gamma",
+            ),
+            map_focal_gamma=_require_float(
+                detection_class_weights_config,
+                "map_focal_gamma",
+            ),
+            agent_focal_alpha=_require_float(
+                detection_class_weights_config,
+                "agent_focal_alpha",
+            ),
+            map_focal_alpha=_require_float(
+                detection_class_weights_config,
+                "map_focal_alpha",
+            ),
             agent_non_none_weight=_require_float(
                 detection_class_weights_config,
                 "agent_non_none_weight",

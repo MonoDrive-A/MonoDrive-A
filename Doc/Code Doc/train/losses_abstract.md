@@ -21,7 +21,7 @@
 
 ## 4. 使用规范
 
-传入 `MonoDriveBackboneOutput` 和 `TrainingBatchLabels`。Agent / Map 分类 CE 在 `auto` / `manual` 下使用标准 Focal Loss（``γ=focal_gamma``，``α`` 默认前景 0.25 / none 0.75）；`disabled` 为 batch mean CE。
+传入 `MonoDriveBackboneOutput` 和 `TrainingBatchLabels`。Agent / Map 分类 CE 在 `auto` / `manual` 下使用标准 Focal Loss（Agent / Map 各自独立 ``γ`` 与 ``α``）；`disabled` 为 batch mean CE。
 
 ## 5. 最小示例
 
@@ -35,6 +35,7 @@
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
+| 2026-06-10 | 1os3_Composer | AI 完成：同步 Agent / Map 独立 Focal 超参摘要。 |
 | 2026-06-09 | 1os3_Composer | AI 完成：同步标准 Focal Loss 与 `focal_gamma` 配置摘要。 |
 | 2026-06-09 | 1os3_Composer | AI 完成：同步检测分类 CE none / non-none 分项日志摘要。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：同步 Agent 16 / Map 32 loss shape 摘要。 |
