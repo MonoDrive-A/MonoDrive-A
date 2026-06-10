@@ -2,7 +2,7 @@
 
 ## 1. 文件基本功能
 
-`train/trainer.py` 运行完整训练流程，包括模型、数据、loss、优化器、梯度监测、checkpoint 和恢复，并在训练开始前打印预期单个 epoch step 数。断点恢复时会按保存的 batch index 切分首个恢复 epoch 的 sampler，避免重新读取已完成 batch。训练入口会把检测分类 none / non-none 权重配置传入 loss 模块。
+`train/trainer.py` 运行完整训练流程，包括模型、数据、loss、优化器、梯度监测、checkpoint 和恢复，并在训练开始前打印预期单个 epoch step 数。断点恢复时会按保存的 batch index 切分首个恢复 epoch 的 sampler，避免重新读取已完成 batch。训练入口会把检测分类 none / non-none 权重配置传入 loss 模块，并按日志间隔记录匈牙利匹配成功的 Agent / Map 检测数量。
 
 ## 2. 主要公开接口
 
@@ -36,6 +36,7 @@
 
 | 日期 | 修改人 | 变更 |
 | --- | --- | --- |
+| 2026-06-10 | 1os3_Composer | AI 完成：记录匈牙利匹配成功检测数量的日志输出。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：同步检测分类 none / non-none 类别权重配置传递说明。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：记录断点恢复 sampler 级跳过已完成 batch。 |
 | 2026-06-08 | 1os3_Codex | AI 完成：新增训练入口摘要。 |

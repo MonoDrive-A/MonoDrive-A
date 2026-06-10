@@ -24,6 +24,7 @@ from train.checkpointing import (
     save_checkpoint,
 )
 from train.data_processing import (
+    TrainingBatchLabels,
     TrainingDataConfig,
     build_training_batch_labels,
     build_training_dataset,
@@ -310,6 +311,7 @@ def _train_step(
     optimizer.step()
 
     metrics = _loss_metrics(loss_output)
+    metrics.update(_matching_metrics(labels))
     metrics["learning_rate"] = float(learning_rate)
     if gradient_result is not None:
         metrics.update(_gradient_metrics(gradient_result))
@@ -457,6 +459,15 @@ def _loss_metrics(loss_output: TrainingLossOutput) -> dict[str, float]:
     }
 
 
+def _matching_metrics(labels: TrainingBatchLabels) -> dict[str, float]:
+    """统计当前 batch 匈牙利匹配成功的 Agent / Map 检测数量。"""
+
+    return {
+        "match/agent_count": float(labels.agent.state_mask.sum().detach().cpu().item()),
+        "match/map_count": float(labels.map.point_mask.sum().detach().cpu().item()),
+    }
+
+
 def _gradient_metrics(result: GradientMonitorResult) -> dict[str, float]:
     return {
         "grad/total_norm": result.total_norm,
@@ -518,6 +529,11 @@ def _maybe_print_metrics(
         message += (
             f" map_ce_fg={metrics['loss/map_class_ce_non_none']:.6f}"
             f" map_ce_bg={metrics['loss/map_class_ce_none']:.6f}"
+        )
+    if "match/agent_count" in metrics and "match/map_count" in metrics:
+        message += (
+            f" agent_match={int(metrics['match/agent_count'])}"
+            f" map_match={int(metrics['match/map_count'])}"
         )
     if gradient_result is not None and gradient_result.has_alert:
         message += (
