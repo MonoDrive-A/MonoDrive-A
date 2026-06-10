@@ -11,7 +11,7 @@ seed = 20260608
 deterministic = false
 
 [dataloader]
-batch_size = 24
+batch_size = 16
 shuffle = true
 num_workers = 0
 pin_memory = true
