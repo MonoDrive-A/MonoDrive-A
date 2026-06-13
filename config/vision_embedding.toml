@@ -18,7 +18,7 @@ residual_block_count = 4
 temporal_compression_after_block = 3
 temporal_compression_kernel = [2, 1, 1]
 temporal_compression_stride = [2, 1, 1]
-output_hidden_dim = 768
+output_hidden_dim = 384
 
 [precision]
 dinov3_dtype = "bfloat16"
